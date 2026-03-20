@@ -13,17 +13,17 @@ echo.
 
 set PYTHON=python
 
-%PYTHON% -c "import streamlit" 2>nul
-if %errorlevel% neq 0 (
-    echo Installazione dipendenze...
-    %PYTHON% -m pip install -r requirements.txt
-)
+echo Avvio Streamlit in background...
+start "Streamlit" %PYTHON% -m streamlit run dashboard/app.py --server.port=8501 --server.headless=false --browser.gatherUsageStats=false --server.runOnSave=false
 
-echo Avvio dashboard su http://localhost:8501
-echo Per fermare: Ctrl+C
-echo.
+echo Attendo avvio server (5 secondi)...
+timeout /t 5 /nobreak > nul
 
+echo Apertura browser su http://localhost:8501
 start "" "http://localhost:8501"
-%PYTHON% -m streamlit run dashboard/app.py --server.port=8501 --server.headless=false --browser.gatherUsageStats=false
 
+echo.
+echo Dashboard avviata! Controlla il browser.
+echo Per fermare: chiudi la finestra "Streamlit" oppure premi Ctrl+C in essa.
+echo.
 pause
