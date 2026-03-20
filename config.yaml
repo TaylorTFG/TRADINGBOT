@@ -1,0 +1,325 @@
+# ============================================================
+# TRADING BOT - CONFIGURAZIONE PRINCIPALE
+# Modifica questo file per personalizzare il comportamento del bot.
+# NON modificare il codice Python direttamente.
+# ============================================================
+
+# ------------------------------------------------------------
+# MODALITÀ OPERATIVA
+# ------------------------------------------------------------
+trading:
+  # Modalità: "paper" (simulazione sicura) o "live" (denaro reale!)
+  mode: "paper"
+
+  # Capitale iniziale in EUR (verrà convertito in USD automaticamente)
+  capital_eur: 500
+
+  # Numero massimo di posizioni aperte contemporaneamente
+  max_open_positions: 6
+
+  # Chiusura forzata posizioni prima della chiusura mercato (ora IT)
+  force_close_time: "21:45"
+
+  # Fuso orario operativo
+  timezone: "Europe/Rome"
+
+# ------------------------------------------------------------
+# CREDENZIALI ALPACA (paper e live)
+# Ottieni le chiavi su: https://app.alpaca.markets/
+# ------------------------------------------------------------
+alpaca:
+  paper:
+    api_key: "YOUR_PAPER_API_KEY"
+    api_secret: "YOUR_PAPER_API_SECRET"
+    base_url: "https://paper-api.alpaca.markets"
+
+  live:
+    api_key: "YOUR_LIVE_API_KEY"
+    api_secret: "YOUR_LIVE_API_SECRET"
+    base_url: "https://api.alpaca.markets"
+
+# ------------------------------------------------------------
+# ASSET SU CUI OPERARE
+# Il bot seleziona automaticamente i migliori asset del giorno
+# ------------------------------------------------------------
+assets:
+  # Priorità 1: ETF Indici (più stabili)
+  etf:
+    enabled: true
+    symbols: ["SPY", "QQQ", "IWM"]
+
+  # Priorità 2: Azioni ad alta liquidità
+  stocks:
+    enabled: true
+    symbols: ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN"]
+
+  # Priorità 3: Crypto (24/7, alta volatilità)
+  crypto:
+    enabled: true
+    symbols: ["BTC/USD", "ETH/USD"]
+
+  # Numero massimo di asset da analizzare contemporaneamente
+  max_assets_per_cycle: 5
+
+# ------------------------------------------------------------
+# FINESTRE ORARIE OPERATIVE (ora italiana)
+# Il bot opera solo nelle finestre orarie indicate
+# ------------------------------------------------------------
+trading_hours:
+  windows:
+    - start: "15:30"
+      end: "17:00"
+      description: "Apertura mercati USA"
+    - start: "19:00"
+      end: "21:00"
+      description: "Sessione americana centrale"
+    - start: "21:00"
+      end: "21:45"
+      description: "Momentum finale"
+
+  # Ore da evitare (bassa liquidità - lunch americano)
+  avoid:
+    - start: "17:00"
+      end: "19:00"
+      description: "Lunch americano"
+
+# ------------------------------------------------------------
+# STRATEGIA 1: MULTI-INDICATOR CONFLUENCE
+# ------------------------------------------------------------
+strategy_confluence:
+  enabled: true
+
+  # Soglia minima indicatori concordi per operare (su 5 totali)
+  min_score: 3
+
+  # RSI - Relative Strength Index
+  rsi:
+    period: 14
+    oversold: 30     # Sotto questa soglia → segnale BUY
+    overbought: 70   # Sopra questa soglia → segnale SELL
+
+  # MACD - Moving Average Convergence Divergence
+  macd:
+    fast_period: 12
+    slow_period: 26
+    signal_period: 9
+
+  # Bollinger Bands
+  bollinger:
+    period: 20
+    std_dev: 2
+
+  # EMA - Exponential Moving Average
+  ema:
+    fast_period: 20
+    slow_period: 50
+
+  # Volume filter
+  volume:
+    lookback_period: 20
+    multiplier: 1.5   # Volume deve essere 150% della media
+
+# ------------------------------------------------------------
+# STRATEGIA 2: BREAKOUT + MOMENTUM
+# ------------------------------------------------------------
+strategy_breakout:
+  enabled: true
+
+  # Numero di giorni per calcolare supporti e resistenze
+  lookback_days: 20
+
+  # Volume minimo per confermare il breakout (200% della media)
+  volume_multiplier: 2.0
+
+  # ADX minimo per confermare trend forte (non laterale)
+  adx_min: 25
+
+  # Periodo ATR per stop e target dinamici
+  atr_period: 14
+
+  # Attendi chiusura candela sopra il livello (anti falso breakout)
+  wait_candle_close: true
+
+# ------------------------------------------------------------
+# STRATEGIA 3: NEWS SENTIMENT
+# ------------------------------------------------------------
+strategy_sentiment:
+  enabled: true
+
+  # Soglia sentiment per segnale BUY forte
+  bullish_threshold: 0.6
+
+  # Soglia sentiment per bloccare acquisti
+  bearish_threshold: -0.6
+
+  # Peso notizie recenti vs. notizie vecchie
+  recent_news_weight: 0.6    # Ultime 2 ore
+  older_news_weight: 0.4     # Ultime 24 ore
+
+  # Finestra temporale notizie in ore
+  news_window_hours: 24
+
+# ------------------------------------------------------------
+# API ESTERNE PER NEWS
+# Ottieni chiavi gratuite su: newsapi.org, alphavantage.co
+# ------------------------------------------------------------
+external_apis:
+  newsapi:
+    api_key: "YOUR_NEWSAPI_KEY"
+    enabled: true
+
+  alpha_vantage:
+    api_key: "YOUR_ALPHAVANTAGE_KEY"
+    enabled: true
+
+# ------------------------------------------------------------
+# MACHINE LEARNING FILTER
+# ------------------------------------------------------------
+ml_filter:
+  enabled: true
+
+  # Confidence minima ML per validare segnale (0-1)
+  min_confidence: 0.65
+
+  # Riallenamento automatico ogni domenica
+  auto_retrain: true
+  retrain_day: "sunday"
+
+  # Mesi di dati storici per il training
+  training_months: 6
+
+  # Parametri Random Forest
+  n_estimators: 100
+  max_depth: 10
+  random_state: 42
+
+# ------------------------------------------------------------
+# GESTIONE DEL RISCHIO
+# ------------------------------------------------------------
+risk_management:
+  # Rischio massimo per singolo trade (% del capitale totale)
+  max_risk_per_trade: 0.02      # 2%
+
+  # Stop loss iniziale dal prezzo di entrata
+  stop_loss_pct: 0.015          # -1.5%
+
+  # Take profit dal prezzo di entrata
+  take_profit_pct: 0.03         # +3%
+
+  # Trailing stop
+  trailing_stop:
+    enabled: true
+    activation_pct: 0.01        # Si attiva quando profitto >= +1%
+    trail_pct: 0.008            # Distanza trailing stop 0.8%
+
+  # Limiti giornalieri
+  daily:
+    max_loss_pct: 0.05          # -5% → bot si ferma
+    target_profit_pct: 0.03     # +3% → riduce size del 50%
+
+  # Limiti settimanali
+  weekly:
+    max_loss_pct: 0.10          # -10% → pausa 2 giorni automatica
+    pause_days: 2
+
+  # Position sizing
+  sizing:
+    # Peso per sistema di voto
+    full_agreement_pct: 0.02    # 3/3 concordi → 2% capitale
+    partial_agreement_pct: 0.01 # 2/3 concordi → 1% capitale
+
+# ------------------------------------------------------------
+# CONTESTO MACRO (filtri di mercato)
+# ------------------------------------------------------------
+market_context:
+  # VIX - Volatility Index
+  vix:
+    high_threshold: 30          # VIX > 30 → dimezza le size
+    enabled: true
+
+  # SP500 daily drop filter
+  sp500:
+    max_daily_drop_pct: 0.02    # SP500 -2% → stop nuovi acquisti
+    enabled: true
+
+  # Safe haven check (oro + obbligazioni su = risk-off)
+  safe_haven:
+    enabled: true
+    gold_symbol: "GLD"
+    bonds_symbol: "TLT"
+
+# ------------------------------------------------------------
+# NOTIFICHE TELEGRAM
+# Crea il tuo bot su: https://t.me/BotFather
+# Ottieni il chat_id scrivendo /start al tuo bot
+# ------------------------------------------------------------
+telegram:
+  enabled: true
+  bot_token: "YOUR_TELEGRAM_BOT_TOKEN"
+  chat_id: "YOUR_TELEGRAM_CHAT_ID"
+
+  # Tipi di notifica da inviare
+  notifications:
+    trade_open: true        # Trade aperto
+    trade_close: true       # Trade chiuso
+    stop_loss_hit: true     # Stop loss scattato
+    daily_drawdown: true    # Drawdown giornaliero raggiunto
+    daily_report: true      # Report giornaliero ore 22:30
+    weekly_report: true     # Report settimanale venerdì
+
+  # Orario report giornaliero (ora italiana)
+  daily_report_time: "22:30"
+
+  # Orario report settimanale (venerdì sera)
+  weekly_report_time: "22:00"
+
+# ------------------------------------------------------------
+# BACKTESTING
+# ------------------------------------------------------------
+backtesting:
+  # Anni di dati storici da utilizzare
+  history_years: 3
+
+  # Slippage simulato per operazione
+  slippage_pct: 0.0005    # 0.05%
+
+  # Commissioni (Alpaca = 0% per azioni USA)
+  commission_pct: 0.0
+
+  # Target metriche (per valutazione risultati)
+  targets:
+    sharpe_ratio: 1.5
+    max_drawdown: 0.15      # 15%
+    win_rate: 0.55          # 55%
+    profit_factor: 1.5
+
+# ------------------------------------------------------------
+# LOGGING
+# ------------------------------------------------------------
+logging:
+  level: "INFO"              # DEBUG, INFO, WARNING, ERROR
+  max_file_size_mb: 10
+  backup_count: 30           # Giorni di log conservati
+  log_dir: "logs"
+
+# ------------------------------------------------------------
+# DATABASE
+# ------------------------------------------------------------
+database:
+  path: "data/trades.db"
+
+# ------------------------------------------------------------
+# DASHBOARD
+# ------------------------------------------------------------
+dashboard:
+  port: 8501
+  host: "localhost"
+  auto_refresh_seconds: 30
+
+# ------------------------------------------------------------
+# PAPER TRADING - SOGLIA PER PASSAGGIO A LIVE
+# ------------------------------------------------------------
+paper_trading:
+  # Giorni profittevoli consecutivi prima di suggerire live
+  days_for_live_suggestion: 30
+  notify_live_ready: true

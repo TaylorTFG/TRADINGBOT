@@ -1,0 +1,63 @@
+# ============================================================
+# GIT IGNORE - TRADING BOT
+# ============================================================
+
+# Ambiente virtuale Python
+venv/
+.venv/
+env/
+.env/
+
+# Variabili d'ambiente (NON committare mai le chiavi API!)
+.env
+*.env
+secrets.yaml
+credentials.yaml
+
+# Cache Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribuzione / packaging
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# Database (contiene dati privati)
+data/trades.db
+data/historical/*.csv
+data/historical/*.parquet
+
+# Modelli ML (file grandi)
+models/*.pkl
+models/*.joblib
+
+# Log
+logs/
+*.log
+
+# Report backtest
+backtester/reports/*.html
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Coverage
+.coverage
+htmlcov/
+
+# MyPy
+.mypy_cache/
