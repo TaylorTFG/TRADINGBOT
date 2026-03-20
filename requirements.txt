@@ -13,8 +13,8 @@ numpy>=2.0.0
 scikit-learn>=1.8.0
 
 # --- Analisi Tecnica ---
+# pandas-ta rimosso: dipende da numba che non supporta Python 3.14
 ta>=0.11.0
-pandas-ta>=0.3.14b
 
 # --- Dashboard ---
 streamlit>=1.35.0

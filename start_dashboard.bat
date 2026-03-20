@@ -11,18 +11,12 @@ echo          TRADING BOT - DASHBOARD
 echo =====================================================
 echo.
 
-:: Determina Python da usare
-if exist "venv\Scripts\python.exe" (
-    set PYTHON=venv\Scripts\python.exe
-) else (
-    set PYTHON=python
-)
+set PYTHON=python
 
-:: Verifica streamlit
 %PYTHON% -c "import streamlit" 2>nul
 if %errorlevel% neq 0 (
     echo Installazione dipendenze...
-    %PYTHON% -m pip install -r requirements.txt --quiet
+    %PYTHON% -m pip install -r requirements.txt
 )
 
 echo Avvio dashboard su http://localhost:8501

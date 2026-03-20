@@ -11,13 +11,16 @@ echo              TRADING BOT - AVVIO
 echo =====================================================
 echo.
 
-:: Determina Python da usare (venv o sistema)
-if exist "venv\Scripts\python.exe" (
-    set PYTHON=venv\Scripts\python.exe
-    echo Usando ambiente virtuale venv
-) else (
-    set PYTHON=python
-    echo Usando Python di sistema
+:: Usa sempre Python di sistema (i pacchetti sono installati li')
+set PYTHON=python
+
+:: Verifica che Python sia disponibile
+%PYTHON% --version 2>nul
+if %errorlevel% neq 0 (
+    echo ERRORE: Python non trovato nel PATH!
+    echo Scarica Python da: https://www.python.org/downloads/
+    pause
+    exit /b 1
 )
 
 :: Verifica config.yaml
@@ -27,13 +30,11 @@ if not exist "config.yaml" (
     exit /b 1
 )
 
-:: Verifica che yaml sia installato
+:: Verifica che yaml sia installato, altrimenti installa
 %PYTHON% -c "import yaml" 2>nul
 if %errorlevel% neq 0 (
-    echo.
-    echo ATTENZIONE: Dipendenze mancanti. Installazione automatica...
-    echo.
-    %PYTHON% -m pip install -r requirements.txt --quiet
+    echo Dipendenze mancanti - installazione in corso...
+    %PYTHON% -m pip install -r requirements.txt
     echo.
 )
 
