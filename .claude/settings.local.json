@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pip install PyYAML alpaca-py pandas numpy scikit-learn streamlit plotly ta vaderSentiment python-telegram-bot APScheduler requests feedparser python-dateutil pytz aiohttp joblib jinja2 matplotlib seaborn --quiet)",
+      "Bash(python -c \"import yaml; import alpaca; import pandas; import streamlit; print\\(''OK - tutte le dipendenze importate''\\)\")",
+      "Bash(python main.py status)",
+      "Bash(set PYTHONIOENCODING=utf-8)"
+    ]
+  }
+}

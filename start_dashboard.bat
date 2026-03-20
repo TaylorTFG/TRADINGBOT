@@ -1,38 +1,35 @@
 @echo off
-chcp 65001 >nul
+chcp 65001 > nul 2>&1
+set PYTHONIOENCODING=utf-8
+set PYTHONUTF8=1
 title Trading Bot - Dashboard
 color 0B
 
 echo.
-echo ╔══════════════════════════════════════════════════════╗
-echo ║          TRADING BOT - DASHBOARD                     ║
-echo ╚══════════════════════════════════════════════════════╝
+echo =====================================================
+echo          TRADING BOT - DASHBOARD
+echo =====================================================
 echo.
 
-:: Verifica ambiente virtuale
-if not exist "venv\Scripts\activate.bat" (
-    echo ERRORE: Ambiente virtuale non trovato.
-    echo Esegui prima install.bat
-    pause
-    exit /b 1
+:: Determina Python da usare
+if exist "venv\Scripts\python.exe" (
+    set PYTHON=venv\Scripts\python.exe
+) else (
+    set PYTHON=python
 )
 
-:: Attiva ambiente virtuale
-call venv\Scripts\activate.bat
+:: Verifica streamlit
+%PYTHON% -c "import streamlit" 2>nul
+if %errorlevel% neq 0 (
+    echo Installazione dipendenze...
+    %PYTHON% -m pip install -r requirements.txt --quiet
+)
 
-echo Avvio dashboard Streamlit...
-echo La dashboard si aprirà nel browser: http://localhost:8501
+echo Avvio dashboard su http://localhost:8501
+echo Per fermare: Ctrl+C
 echo.
-echo Per fermare la dashboard: Ctrl+C
-echo.
 
-:: Avvia dashboard e apri browser
-start /B "" python -m streamlit run dashboard/app.py --server.port=8501 --server.headless=false --browser.gatherUsageStats=false
-
-:: Attendi e apri browser
-timeout /t 3 /nobreak >nul
 start "" "http://localhost:8501"
+%PYTHON% -m streamlit run dashboard/app.py --server.port=8501 --server.headless=false --browser.gatherUsageStats=false
 
-:: Mantieni la finestra aperta
-echo Dashboard in esecuzione su http://localhost:8501
 pause

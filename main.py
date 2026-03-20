@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 # ============================================================
 # MAIN - ENTRY POINT PRINCIPALE DEL TRADING BOT
 # Avvia il bot, la dashboard o il backtester
@@ -7,7 +8,15 @@
 import argparse
 import logging
 import sys
+import os
 import yaml
+
+# Forza UTF-8 su Windows per evitare UnicodeEncodeError
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
 from pathlib import Path
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -293,13 +302,13 @@ def train_ml(args):
         metrics = ml.train(broker, symbols)
 
         if metrics.get('success'):
-            print(f"\n✅ Training completato!")
+            print(f"\n[OK] Training completato!")
             print(f"   Accuracy: {metrics.get('accuracy', 0):.2%}")
             print(f"   Campioni: {metrics.get('train_samples', 0)}")
             if metrics.get('top_features'):
                 print(f"   Top features: {', '.join([f[0] for f in metrics['top_features'][:3]])}")
         else:
-            print(f"\n❌ Training fallito: {metrics.get('reason')}")
+            print(f"\n[ERRORE] Training fallito: {metrics.get('reason')}")
 
     except Exception as e:
         logger.error(f"Errore training ML: {e}", exc_info=True)
@@ -317,11 +326,11 @@ def check_status(args):
     print("TRADING BOT - STATUS")
     print("=" * 50)
     print(f"Modalità: {mode.upper()}")
-    print(f"Capitale: €{capital} (≈ ${capital * 1.09:.0f})")
-    print(f"Strategie: "
-          f"Confluence={'✅' if config.get('strategy_confluence', {}).get('enabled') else '❌'} | "
-          f"Breakout={'✅' if config.get('strategy_breakout', {}).get('enabled') else '❌'} | "
-          f"Sentiment={'✅' if config.get('strategy_sentiment', {}).get('enabled') else '❌'}")
+    print(f"Capitale: EUR {capital} (~ ${capital * 1.09:.0f})")
+    s1 = "ON" if config.get('strategy_confluence', {}).get('enabled') else "OFF"
+    s2 = "ON" if config.get('strategy_breakout', {}).get('enabled') else "OFF"
+    s3 = "ON" if config.get('strategy_sentiment', {}).get('enabled') else "OFF"
+    print(f"Strategie: Confluence={s1} | Breakout={s2} | Sentiment={s3}")
 
     # Controlla il database
     db_path = config.get('database', {}).get('path', 'data/trades.db')
@@ -401,7 +410,7 @@ Esempi:
     else:
         # Se nessun comando specificato, mostra help
         parser.print_help()
-        print("\n📖 Per iniziare:")
+        print("\nPer iniziare:")
         print("   1. Configura le API keys in config.yaml")
         print("   2. python main.py bot        (avvia in paper trading)")
         print("   3. python main.py dashboard  (apri dashboard)")

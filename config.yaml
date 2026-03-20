@@ -29,8 +29,8 @@ trading:
 # ------------------------------------------------------------
 alpaca:
   paper:
-    api_key: "YOUR_PAPER_API_KEY"
-    api_secret: "YOUR_PAPER_API_SECRET"
+    api_key: PK2JGMIX3Y36Y3LP6AOWG7OHJB
+    api_secret: 52L3W4uxKVdo9RdvezrojTYAnEGq9m1HkxTRxapx6dxr
     base_url: "https://paper-api.alpaca.markets"
 
   live:

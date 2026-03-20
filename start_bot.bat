@@ -1,44 +1,51 @@
 @echo off
-chcp 65001 >nul
+chcp 65001 > nul 2>&1
+set PYTHONIOENCODING=utf-8
+set PYTHONUTF8=1
 title Trading Bot - In Esecuzione
 color 0A
 
 echo.
-echo ╔══════════════════════════════════════════════════════╗
-echo ║              TRADING BOT - AVVIO                     ║
-echo ╚══════════════════════════════════════════════════════╝
+echo =====================================================
+echo              TRADING BOT - AVVIO
+echo =====================================================
 echo.
 
-:: Verifica ambiente virtuale
-if not exist "venv\Scripts\activate.bat" (
-    echo ERRORE: Ambiente virtuale non trovato.
-    echo Esegui prima install.bat
-    pause
-    exit /b 1
+:: Determina Python da usare (venv o sistema)
+if exist "venv\Scripts\python.exe" (
+    set PYTHON=venv\Scripts\python.exe
+    echo Usando ambiente virtuale venv
+) else (
+    set PYTHON=python
+    echo Usando Python di sistema
 )
-
-:: Attiva ambiente virtuale
-call venv\Scripts\activate.bat
 
 :: Verifica config.yaml
 if not exist "config.yaml" (
     echo ERRORE: config.yaml non trovato!
-    echo Assicurati di essere nella cartella del bot.
     pause
     exit /b 1
 )
 
-echo Ambiente virtuale attivo
-echo Avvio bot in modalità PAPER TRADING...
+:: Verifica che yaml sia installato
+%PYTHON% -c "import yaml" 2>nul
+if %errorlevel% neq 0 (
+    echo.
+    echo ATTENZIONE: Dipendenze mancanti. Installazione automatica...
+    echo.
+    %PYTHON% -m pip install -r requirements.txt --quiet
+    echo.
+)
+
+echo Avvio bot in modalita PAPER TRADING...
 echo.
-echo Per fermare il bot: Ctrl+C o usa stop_bot.bat
+echo Per fermare: Ctrl+C
 echo Per la dashboard: start_dashboard.bat (in una nuova finestra)
 echo.
-echo ═══════════════════════════════════════════════════════
+echo =====================================================
 echo.
 
-:: Avvia il bot
-python main.py bot
+%PYTHON% main.py bot
 
 echo.
 echo Bot fermato.
