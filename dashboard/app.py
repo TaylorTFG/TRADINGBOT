@@ -83,6 +83,32 @@ def load_config():
     return {}
 
 
+def load_virtual_capital() -> dict:
+    """
+    Legge il capitale virtuale aggiornato dal bot.
+    Restituisce i dati dal file data/virtual_capital.json.
+    Se il file non esiste, calcola il valore iniziale dalla config.
+    """
+    vc_path = Path(__file__).parent.parent / 'data' / 'virtual_capital.json'
+    if vc_path.exists():
+        try:
+            with open(vc_path) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    # Fallback: usa il valore da config
+    config = load_config()
+    capital_eur = config.get('trading', {}).get('capital_eur', 500)
+    initial = capital_eur * 1.09
+    return {
+        'virtual_capital': initial,
+        'initial_capital': initial,
+        'capital_eur': capital_eur,
+        'total_pnl': 0.0,
+        'total_pnl_pct': 0.0,
+    }
+
+
 def save_config(config: dict):
     """Salva la configurazione nel file yaml."""
     config_path = Path(__file__).parent.parent / 'config.yaml'
@@ -198,23 +224,21 @@ if "Overview" in page:
     today_stats = db.get_today_stats()
     daily_history = db.get_daily_stats_history(30)
 
-    # Tenta di caricare il broker per dati live
-    try:
-        from bot.broker import BrokerClient
-        broker = BrokerClient(config)
-        account = broker.get_account()
-        current_capital = account.get('portfolio_value', 0)
-        buying_power = account.get('buying_power', 0)
-    except Exception:
-        current_capital = 0
-        buying_power = 0
+    # Legge il capitale virtuale aggiornato dal bot (non i $100k Alpaca)
+    vc_data = load_virtual_capital()
+    current_capital = vc_data.get('virtual_capital', 0)
+    initial_capital = vc_data.get('initial_capital', 0)
+    capital_eur = vc_data.get('capital_eur', 500)
+    total_pnl = vc_data.get('total_pnl', 0)
+    total_pnl_pct = vc_data.get('total_pnl_pct', 0)
 
-    # Capitale iniziale dalla config
-    capital_eur = config.get('trading', {}).get('capital_eur', 500)
-    initial_capital = capital_eur * 1.09
-
-    total_pnl = current_capital - initial_capital if current_capital > 0 else 0
-    total_pnl_pct = total_pnl / initial_capital if initial_capital > 0 else 0
+    # Banner informativo
+    eur_equiv = current_capital / 1.09
+    st.info(
+        f"**Capitale Virtuale:** ${current_capital:.2f} (~€{eur_equiv:.0f}) — "
+        f"basato su €{capital_eur} configurati. "
+        f"L'account Alpaca ha $100,000 (solo per eseguire gli ordini)."
+    )
 
     # Row 1: Metriche principali
     c1, c2, c3, c4 = st.columns(4)
@@ -222,9 +246,9 @@ if "Overview" in page:
     with c1:
         delta_color = "normal" if total_pnl_pct >= 0 else "inverse"
         st.metric(
-            "💰 Portafoglio",
-            f"${current_capital:,.2f}" if current_capital else "N/A",
-            f"{total_pnl:+.2f}$ ({total_pnl_pct:+.2%})" if current_capital else None,
+            "💰 Portafoglio Virtuale",
+            f"${current_capital:.2f}",
+            f"{total_pnl:+.2f}$ ({total_pnl_pct:+.2%})" if total_pnl != 0 else "Nessun trade ancora",
             delta_color=delta_color
         )
 

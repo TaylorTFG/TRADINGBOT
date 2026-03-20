@@ -57,7 +57,15 @@ class TradingEngine:
         # Stato del bot
         self.running = False
         self.paused = False
-        self._starting_capital: Optional[float] = None
+
+        # Tasso di cambio EUR/USD (approssimativo)
+        self._eur_usd_rate = 1.09
+
+        # Capitale virtuale: parte da capital_eur configurato, non dai $100k di Alpaca.
+        # Tutti i calcoli di sizing e i limiti giornalieri usano questo valore.
+        capital_eur = self.config.get('trading', {}).get('capital_eur', 500)
+        self._initial_virtual_capital: float = capital_eur * self._eur_usd_rate
+        self._virtual_capital: float = self._initial_virtual_capital
         self._daily_starting_capital: Optional[float] = None
         self._weekly_starting_capital: Optional[float] = None
 
@@ -145,13 +153,14 @@ class TradingEngine:
             logger.error("Impossibile connettersi ad Alpaca. Verifica le credenziali in config.yaml")
             return
 
-        # Recupera capitale iniziale
-        account = self.broker.get_account()
-        self._starting_capital = account.get('portfolio_value', 0)
-        self._daily_starting_capital = self._starting_capital
-        self._weekly_starting_capital = self._starting_capital
+        # Carica capitale virtuale da file (se bot già avviato in precedenza)
+        self._virtual_capital = self._load_virtual_capital()
+        self._daily_starting_capital = self._virtual_capital
+        self._weekly_starting_capital = self._virtual_capital
 
-        logger.info(f"Capitale iniziale: ${self._starting_capital:.2f}")
+        capital_eur = self.config.get('trading', {}).get('capital_eur', 500)
+        logger.info(f"Capitale virtuale: €{capital_eur} = ${self._virtual_capital:.2f} USD")
+        logger.info(f"(Account Alpaca paper: $100,000 — usato solo come esecutore ordini)")
 
         # Notifica avvio
         self.notifier.notify_bot_status('started')
@@ -246,9 +255,8 @@ class TradingEngine:
             logger.debug(f"Fuori orario operativo: {now.strftime('%H:%M')}")
             return
 
-        # --- FASE 3: Verifica limiti giornalieri ---
-        account = self.broker.get_account()
-        current_capital = account.get('portfolio_value', self._starting_capital or 0)
+        # --- FASE 3: Verifica limiti giornalieri sul capitale virtuale ---
+        current_capital = self._virtual_capital  # Usa capitale virtuale (es. $545), non i $100k Alpaca
 
         if self._daily_starting_capital and self._daily_starting_capital > 0:
             daily_check = self.risk_manager.check_daily_limits(
@@ -661,10 +669,17 @@ class TradingEngine:
                 'pnl_pct': pnl_pct
             }
 
+            # Aggiorna capitale virtuale con il P&L del trade
+            self._virtual_capital += pnl
+            self._save_virtual_capital()
+
             # Notifica Telegram
             self.notifier.notify_trade_close(trade_data, reason)
 
-            logger.info(f"[{symbol}] Posizione chiusa: PnL={pnl:+.2f}$ ({pnl_pct:+.2%}) | {reason}")
+            logger.info(
+                f"[{symbol}] Posizione chiusa: PnL={pnl:+.2f}$ ({pnl_pct:+.2%}) | {reason} | "
+                f"Capitale virtuale: ${self._virtual_capital:.2f}"
+            )
 
     def _close_all_positions(self, reason: str):
         """Chiude tutte le posizioni aperte."""
@@ -707,6 +722,55 @@ class TradingEngine:
         return False
 
     # ----------------------------------------------------------------
+    # GESTIONE CAPITALE VIRTUALE
+    # ----------------------------------------------------------------
+
+    def _save_virtual_capital(self):
+        """
+        Salva il capitale virtuale su file JSON.
+        Permette di riprendere dalla stessa cifra al riavvio del bot.
+        """
+        import json
+        from pathlib import Path
+        Path('data').mkdir(exist_ok=True)
+        data = {
+            'virtual_capital': self._virtual_capital,
+            'initial_capital': self._initial_virtual_capital,
+            'capital_eur': self.config.get('trading', {}).get('capital_eur', 500),
+            'total_pnl': self._virtual_capital - self._initial_virtual_capital,
+            'total_pnl_pct': (self._virtual_capital - self._initial_virtual_capital) / self._initial_virtual_capital,
+            'updated_at': datetime.now().isoformat(),
+        }
+        with open('data/virtual_capital.json', 'w') as f:
+            json.dump(data, f, indent=2)
+
+    def _load_virtual_capital(self) -> float:
+        """
+        Carica il capitale virtuale dal file JSON.
+        Al primo avvio usa il valore da config.yaml.
+
+        Returns:
+            Capitale virtuale corrente in USD
+        """
+        import json
+        from pathlib import Path
+        path = Path('data/virtual_capital.json')
+        if path.exists():
+            try:
+                with open(path) as f:
+                    data = json.load(f)
+                capital = data.get('virtual_capital', self._initial_virtual_capital)
+                logger.info(f"Capitale virtuale caricato: ${capital:.2f} (dal file precedente)")
+                return capital
+            except Exception as e:
+                logger.warning(f"Impossibile caricare capitale virtuale: {e}. Uso valore config.")
+
+        # Prima volta: salva e restituisce il valore iniziale
+        logger.info(f"Prima esecuzione — capitale virtuale inizializzato: ${self._initial_virtual_capital:.2f}")
+        self._save_virtual_capital()
+        return self._initial_virtual_capital
+
+    # ----------------------------------------------------------------
     # TASK SCHEDULATI
     # ----------------------------------------------------------------
 
@@ -714,8 +778,8 @@ class TradingEngine:
         """Resetta lo stato giornaliero a mezzanotte."""
         logger.info("Reset giornaliero in corso...")
 
-        account = self.broker.get_account()
-        self._daily_starting_capital = account.get('portfolio_value', 0)
+        # Il capitale giornaliero di riferimento è il virtuale, non quello Alpaca
+        self._daily_starting_capital = self._virtual_capital
 
         self.risk_manager.reset_daily_state()
 
@@ -735,10 +799,9 @@ class TradingEngine:
 
     def _send_daily_report(self):
         """Invia il report giornaliero via Telegram."""
-        account = self.broker.get_account()
         stats = self.db.get_today_stats()
 
-        current_capital = account.get('portfolio_value', 0)
+        current_capital = self._virtual_capital
         daily_pnl = current_capital - (self._daily_starting_capital or current_capital)
         daily_pnl_pct = daily_pnl / self._daily_starting_capital if self._daily_starting_capital else 0
 
@@ -764,13 +827,12 @@ class TradingEngine:
     def _send_weekly_report(self):
         """Invia il report settimanale via Telegram."""
         metrics = self.db.get_performance_metrics()
-        account = self.broker.get_account()
 
-        weekly_pnl = account.get('portfolio_value', 0) - (self._weekly_starting_capital or 0)
+        weekly_pnl = self._virtual_capital - (self._weekly_starting_capital or self._virtual_capital)
         weekly_pnl_pct = weekly_pnl / self._weekly_starting_capital if self._weekly_starting_capital else 0
 
         # Aggiorna capitale settimanale di riferimento
-        self._weekly_starting_capital = account.get('portfolio_value', 0)
+        self._weekly_starting_capital = self._virtual_capital
 
         # Verifica limiti settimanali
         weekly_check = self.risk_manager.check_weekly_limits(weekly_pnl_pct)
@@ -782,7 +844,7 @@ class TradingEngine:
             **metrics,
             'total_pnl': weekly_pnl,
             'pnl_pct': weekly_pnl_pct,
-            'ending_capital': account.get('portfolio_value', 0),
+            'ending_capital': self._virtual_capital,
             'best_strategy': best_strategy,
             'paused_next_week': weekly_check.get('should_pause', False)
         }

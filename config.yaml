@@ -12,7 +12,11 @@ trading:
   mode: "paper"
 
   # Capitale iniziale in EUR (verrà convertito in USD automaticamente)
+  # NOTA: Alpaca paper dà $100,000 ma il bot opera SOLO su questo importo
   capital_eur: 500
+
+  # Tasso di cambio EUR/USD usato per la conversione
+  eur_usd_rate: 1.09
 
   # Numero massimo di posizioni aperte contemporaneamente
   max_open_positions: 6
