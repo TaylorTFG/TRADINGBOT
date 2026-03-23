@@ -1,1 +1,1 @@
-web: python render_dashboard.py
+web: python render_entrypoint.py
