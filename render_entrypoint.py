@@ -122,21 +122,6 @@ def run_bot_in_background():
         logger.error(f"Errore bot: {e}", exc_info=True)
 
 
-def start_bot():
-    """Avvia il bot e il telegram handler in thread daemon."""
-    global bot_thread, bot_running
-
-    if not bot_running:
-        # Avvia il trading bot
-        bot_thread = threading.Thread(target=run_bot_in_background, daemon=True)
-        bot_thread.start()
-        bot_running = True
-        logger.info("✅ Trading Bot thread avviato")
-
-        # Avvia il telegram bot handler
-        telegram_thread = threading.Thread(target=run_telegram_bot_in_background, daemon=True)
-        telegram_thread.start()
-        logger.info("✅ Telegram Bot Handler thread avviato")
 
 
 if __name__ == "__main__":
@@ -145,14 +130,20 @@ if __name__ == "__main__":
 
     logger.info(f"🚀 Render Entrypoint - Porta: {port}")
 
-    # Avvia il bot in background
-    start_bot()
+    # Avvia il TRADING BOT in background thread
+    bot_thread = threading.Thread(target=run_bot_in_background, daemon=True)
+    bot_thread.start()
+    logger.info("✅ Trading Bot thread avviato")
 
-    # Avvia Flask server
+    # Avvia Flask server NEL MAIN THREAD
     logger.info(f"🌐 Web server in ascolto su 0.0.0.0:{port}")
-    app.run(
-        host='0.0.0.0',
-        port=port,
-        debug=False,
-        use_reloader=False
-    )
+
+    try:
+        app.run(
+            host='0.0.0.0',
+            port=port,
+            debug=False,
+            use_reloader=False
+        )
+    except KeyboardInterrupt:
+        logger.info("Server fermato")
