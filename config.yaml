@@ -261,7 +261,7 @@ market_context:
 telegram:
   enabled: true
   bot_token: "8394682983:AAEd-tMhskER95c6Q3a4Mxa2n6h9gAuC51o"
-  chat_id: ""  # Ottenuto automaticamente al primo /start
+  chat_id: "1749236118"
 
   # Tipi di notifica da inviare
   notifications:
