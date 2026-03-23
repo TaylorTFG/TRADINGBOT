@@ -137,6 +137,26 @@ def api_capital():
     return jsonify({'capital_eur': 500, 'capital_usd': 545}), 202
 
 
+@app.route('/api/analysis')
+def api_analysis():
+    """API per le analisi recenti delle strategie."""
+    import json
+    analysis_file = Path('data/recent_analysis.json')
+
+    try:
+        if analysis_file.exists():
+            with open(analysis_file, 'r', encoding='utf-8') as f:
+                return jsonify(json.load(f))
+    except Exception as e:
+        logger.error(f"Errore lettura analisi: {e}")
+
+    return jsonify({
+        'analyses': [],
+        'total': 0,
+        'message': 'No analysis data yet'
+    }), 202
+
+
 def run_telegram_bot_in_background():
     """Avvia il Telegram bot handler in un thread separato."""
     try:
