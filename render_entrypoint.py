@@ -157,6 +157,39 @@ def api_analysis():
     }), 202
 
 
+@app.route('/api/heartbeat')
+def api_heartbeat():
+    """API per il heartbeat del bot (verifica se sta girando)."""
+    import json
+    heartbeat_file = Path('data/bot_heartbeat.json')
+
+    try:
+        if heartbeat_file.exists():
+            with open(heartbeat_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+                # Calcola quanto tempo fa è stato l'ultimo aggiornamento
+                from datetime import datetime
+                from zoneinfo import ZoneInfo
+
+                last_update = datetime.fromisoformat(data.get('timestamp', ''))
+                now = datetime.now(ZoneInfo("Europe/Rome"))
+                seconds_ago = (now - last_update).total_seconds()
+
+                return jsonify({
+                    **data,
+                    'seconds_ago': int(seconds_ago),
+                    'is_alive': seconds_ago < 300  # Vivo se aggiornato negli ultimi 5 minuti
+                })
+    except Exception as e:
+        logger.error(f"Errore lettura heartbeat: {e}")
+
+    return jsonify({
+        'alive': False,
+        'message': 'Bot heartbeat not found'
+    }), 202
+
+
 def run_telegram_bot_in_background():
     """Avvia il Telegram bot handler in un thread separato."""
     try:
