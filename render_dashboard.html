@@ -244,6 +244,15 @@
             </div>
         </div>
 
+        <!-- Analysis Card -->
+        <div class="card">
+            <h2>🎯 Ultimi Segnali di Trading (Real-Time)</h2>
+            <div class="logs-container" id="analysis-container">
+                <div class="log-line"><span class="loading"></span>Loading analysis...</div>
+            </div>
+            <button class="refresh-btn" onclick="refreshAnalysis()">🔄 Aggiorna Segnali</button>
+        </div>
+
         <!-- Logs Card -->
         <div class="card">
             <h2>📝 Ultimi Log (ultimi 20)</h2>
@@ -333,11 +342,62 @@
             fetchLogs();
         }
 
+        async function fetchAnalysis() {
+            try {
+                const response = await fetch('/api/analysis');
+                const data = await response.json();
+
+                const container = document.getElementById('analysis-container');
+                container.innerHTML = '';
+
+                if (data.analyses && data.analyses.length > 0) {
+                    // Mostra solo gli ultimi 30 in reverse (più recenti prima)
+                    const recent = data.analyses.slice(-30).reverse();
+
+                    recent.forEach(analysis => {
+                        const line = document.createElement('div');
+                        line.className = 'log-line';
+
+                        const time = new Date(analysis.timestamp).toLocaleTimeString('it-IT');
+                        const signal = analysis.signal || 'HOLD';
+                        const symbol = analysis.symbol || '?';
+
+                        // Colora per segnale
+                        if (signal === 'BUY') {
+                            line.classList.add('log-success');
+                            line.textContent = `✅ [${symbol}] ${signal} - ${JSON.stringify(analysis.details).substring(0, 50)}...`;
+                        } else if (signal === 'SELL') {
+                            line.classList.add('log-error');
+                            line.textContent = `❌ [${symbol}] ${signal} - ${JSON.stringify(analysis.details).substring(0, 50)}...`;
+                        } else {
+                            line.textContent = `⏸️  [${symbol}] ${signal} - ${JSON.stringify(analysis.details).substring(0, 50)}...`;
+                        }
+
+                        container.appendChild(line);
+                    });
+                } else {
+                    container.innerHTML = '<div class="log-line">Nessun segnale ancora (in attesa di analisi...)</div>';
+                }
+            } catch (e) {
+                console.error('Errore analysis:', e);
+                document.getElementById('analysis-container').innerHTML =
+                    '<div class="log-line log-error">Errore caricamento analisi</div>';
+            }
+        }
+
+        function refreshAnalysis() {
+            fetchAnalysis();
+        }
+
         // Carica subito al load
         window.onload = () => {
             refreshAll();
+            fetchAnalysis();
             // Refresh automatico ogni 30 secondi
-            setInterval(refreshAll, 30000);
+            setInterval(() => {
+                refreshAll();
+                fetchAnalysis();
+            }, 30000);
         };
     </script>
 </body>
