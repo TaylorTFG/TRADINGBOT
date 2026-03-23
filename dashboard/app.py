@@ -206,7 +206,7 @@ if "Overview" in page:
 
     col_status, col_time = st.columns([1, 2])
     with col_status:
-        if status == 'running':
+        if status in ('running', 'started'):
             st.markdown('<span class="status-on">● BOT ATTIVO</span>', unsafe_allow_html=True)
         elif status == 'paused':
             st.markdown('<span class="status-pause">⏸ BOT IN PAUSA</span>', unsafe_allow_html=True)

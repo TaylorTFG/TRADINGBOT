@@ -400,7 +400,11 @@ class BrokerClient:
             is_crypto = '/' in symbol or symbol in ['BTCUSD', 'ETHUSD']
 
             if is_crypto:
-                alpaca_symbol = symbol.replace('/', '')
+                # Assicura che il simbolo crypto abbia il formato BTC/USD (Alpaca lo richiede)
+                if '/' not in symbol:
+                    alpaca_symbol = symbol[:-3] + '/' + symbol[-3:] if len(symbol) > 3 else symbol
+                else:
+                    alpaca_symbol = symbol
                 request = CryptoBarsRequest(
                     symbol_or_symbols=alpaca_symbol,
                     timeframe=tf,
@@ -457,10 +461,14 @@ class BrokerClient:
             Prezzo attuale o None in caso di errore
         """
         try:
-            is_crypto = '/' in symbol
+            is_crypto = '/' in symbol or symbol in ['BTCUSD', 'ETHUSD']
 
             if is_crypto:
-                alpaca_symbol = symbol.replace('/', '')
+                # Assicura che il simbolo crypto abbia il formato BTC/USD (Alpaca lo richiede)
+                if '/' not in symbol:
+                    alpaca_symbol = symbol[:-3] + '/' + symbol[-3:] if len(symbol) > 3 else symbol
+                else:
+                    alpaca_symbol = symbol
                 request = CryptoLatestQuoteRequest(symbol_or_symbols=alpaca_symbol)
                 quote = self._retry_on_error(
                     self.crypto_data_client.get_crypto_latest_quote,

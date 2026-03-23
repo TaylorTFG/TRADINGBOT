@@ -13,8 +13,12 @@ echo.
 
 set PYTHON=python
 
+REM Disabilita telemetry e prompt di Streamlit
+set STREAMLIT_TELEMETRY_ENABLED=false
+set STREAMLIT_CLIENT_TOOLBARMODE=minimal
+
 echo Avvio Streamlit in background...
-start "Streamlit" %PYTHON% -m streamlit run dashboard/app.py --server.port=8501 --server.headless=false --browser.gatherUsageStats=false --server.runOnSave=false
+start "Streamlit Dashboard" cmd /k "%PYTHON% -m streamlit run dashboard/app.py --server.port=8501 --client.showErrorDetails=false"
 
 echo Attendo avvio server (5 secondi)...
 timeout /t 5 /nobreak > nul

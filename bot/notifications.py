@@ -5,6 +5,7 @@
 
 import logging
 import asyncio
+import json
 from datetime import datetime
 from typing import Optional, Dict
 from zoneinfo import ZoneInfo
@@ -219,7 +220,9 @@ class TelegramNotifier:
         return self._send_message(message)
 
     def notify_bot_status(self, status: str, reason: str = "") -> bool:
-        """Notifica cambio di stato del bot."""
+        """Notifica cambio di stato del bot e salva stato nel file."""
+        from pathlib import Path
+
         status_map = {
             'started': ('🟢', 'AVVIATO'),
             'stopped': ('🔴', 'FERMATO'),
@@ -236,6 +239,22 @@ class TelegramNotifier:
 
         if reason:
             message += f"\n📝 Motivo: _{reason}_"
+
+        # Salva stato in file JSON per la dashboard
+        status_data = {
+            'status': status,
+            'status_it': status_it,
+            'timestamp': datetime.now(IT_TZ).isoformat(),
+            'reason': reason,
+            'mode': self.config.get('trading', {}).get('mode', 'paper')
+        }
+        status_file = Path('data/bot_status.json')
+        try:
+            status_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(status_file, 'w') as f:
+                json.dump(status_data, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"Errore salvando bot_status.json: {e}")
 
         return self._send_message(message)
 

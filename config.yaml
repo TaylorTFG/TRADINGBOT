@@ -47,23 +47,24 @@ alpaca:
 # Il bot seleziona automaticamente i migliori asset del giorno
 # ------------------------------------------------------------
 assets:
-  # Priorità 1: ETF Indici (più stabili)
+  # Priorità 1: ETF Indici + Settoriali (diversificazione, trend solidi)
   etf:
     enabled: true
-    symbols: ["SPY", "QQQ", "IWM"]
+    symbols: ["SPY", "QQQ", "IWM", "XLK", "XLV", "XLF", "GLD"]
 
-  # Priorità 2: Azioni ad alta liquidità
+  # Priorità 2: Azioni ad alta liquidità (blue-chip + growth)
   stocks:
     enabled: true
-    symbols: ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN"]
+    symbols: ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "GOOGL", "META", "NFLX", "AMD", "INTC"]
 
-  # Priorità 3: Crypto (24/7, alta volatilità)
+  # Priorità 3: Crypto (24/7, alta volatilità, trend forti)
   crypto:
     enabled: true
-    symbols: ["BTC/USD", "ETH/USD"]
+    symbols: ["BTC/USD", "ETH/USD", "SOL/USD"]
 
   # Numero massimo di asset da analizzare contemporaneamente
-  max_assets_per_cycle: 5
+  # IMPORTANTE: 20 è il sweet spot per qualità segnali + diversificazione
+  max_assets_per_cycle: 20
 
 # ------------------------------------------------------------
 # FINESTRE ORARIE OPERATIVE (ora italiana)
