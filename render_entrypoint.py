@@ -47,14 +47,13 @@ def root():
 
 
 @app.route('/dashboard/')
-def dashboard_proxy():
-    """Proxy per la dashboard Streamlit (localhost:8501)."""
+def dashboard():
+    """Serve la dashboard HTML."""
     try:
-        import requests
-        response = requests.get('http://localhost:8501/')
-        return response.text, response.status_code
+        with open('render_dashboard.html', 'r', encoding='utf-8') as f:
+            return f.read()
     except Exception as e:
-        return jsonify({'error': 'Dashboard non disponibile', 'details': str(e)}), 503
+        return jsonify({'error': 'Dashboard non disponibile', 'details': str(e)}), 500
 
 
 @app.route('/health')
@@ -169,23 +168,6 @@ def run_telegram_bot_in_background():
         logger.error(f"Errore Telegram bot: {e}", exc_info=True)
 
 
-def run_streamlit_in_background():
-    """Avvia Streamlit dashboard in background."""
-    try:
-        logger.info("📊 Avvio Streamlit Dashboard...")
-        import subprocess
-        subprocess.Popen([
-            sys.executable, '-m', 'streamlit', 'run',
-            'dashboard/app.py',
-            '--server.port=8501',
-            '--server.address=localhost',
-            '--logger.level=warning',
-            '--client.showErrorDetails=false'
-        ])
-    except Exception as e:
-        logger.error(f"Errore Streamlit: {e}")
-
-
 def run_bot_in_background():
     """Avvia il bot in un thread separato."""
     global bot_running
@@ -219,11 +201,6 @@ if __name__ == "__main__":
     port = int(os.environ.get('PORT', 5000))
 
     logger.info(f"🚀 Render Entrypoint - Porta: {port}")
-
-    # Avvia STREAMLIT in background thread
-    streamlit_thread = threading.Thread(target=run_streamlit_in_background, daemon=True)
-    streamlit_thread.start()
-    logger.info("✅ Streamlit Dashboard thread avviato")
 
     # Avvia il TRADING BOT in background thread
     bot_thread = threading.Thread(target=run_bot_in_background, daemon=True)
