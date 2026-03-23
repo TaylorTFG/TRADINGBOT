@@ -171,7 +171,7 @@ strategy_sentiment:
 external_apis:
   newsapi:
     api_key: "YOUR_NEWSAPI_KEY"
-    enabled: true
+    enabled: false
 
   alpha_vantage:
     api_key: "YOUR_ALPHAVANTAGE_KEY"
@@ -260,8 +260,8 @@ market_context:
 # ------------------------------------------------------------
 telegram:
   enabled: true
-  bot_token: "YOUR_TELEGRAM_BOT_TOKEN"
-  chat_id: "YOUR_TELEGRAM_CHAT_ID"
+  bot_token: "8394682983:AAEd-tMhskER95c6Q3a4Mxa2n6h9gAuC51o"
+  chat_id: ""  # Ottenuto automaticamente al primo /start
 
   # Tipi di notifica da inviare
   notifications:
