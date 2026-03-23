@@ -9,12 +9,16 @@ import os
 import sys
 import threading
 import logging
+import asyncio
 from flask import Flask, jsonify
 from pathlib import Path
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Import yaml per leggere config
+import yaml
 
 # Crea app Flask
 app = Flask(__name__)
@@ -61,6 +65,33 @@ def api_status():
     return jsonify({'status': 'unknown'}), 503
 
 
+def run_telegram_bot_in_background():
+    """Avvia il Telegram bot handler in un thread separato."""
+    try:
+        logger.info("📱 Avvio Telegram Bot Handler...")
+
+        # Carica il config per ottenere il token
+        with open('config.yaml', 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+
+        bot_token = config.get('telegram', {}).get('bot_token', '')
+
+        if 'YOUR_' in bot_token or not bot_token:
+            logger.warning("⚠️ Telegram bot token non configurato, skipping...")
+            return
+
+        # Importa e avvia il telegram handler
+        from bot.telegram_handler import start_telegram_bot
+
+        # Avvia il telegram bot (blocking call)
+        asyncio.run(start_telegram_bot(bot_token))
+
+    except ImportError:
+        logger.warning("⚠️ telegram_handler non disponibile, skipping...")
+    except Exception as e:
+        logger.error(f"Errore Telegram bot: {e}", exc_info=True)
+
+
 def run_bot_in_background():
     """Avvia il bot in un thread separato."""
     global bot_running
@@ -88,14 +119,20 @@ def run_bot_in_background():
 
 
 def start_bot():
-    """Avvia il bot in un thread daemon."""
+    """Avvia il bot e il telegram handler in thread daemon."""
     global bot_thread, bot_running
 
     if not bot_running:
+        # Avvia il trading bot
         bot_thread = threading.Thread(target=run_bot_in_background, daemon=True)
         bot_thread.start()
         bot_running = True
-        logger.info("✅ Bot thread avviato")
+        logger.info("✅ Trading Bot thread avviato")
+
+        # Avvia il telegram bot handler
+        telegram_thread = threading.Thread(target=run_telegram_bot_in_background, daemon=True)
+        telegram_thread.start()
+        logger.info("✅ Telegram Bot Handler thread avviato")
 
 
 if __name__ == "__main__":
