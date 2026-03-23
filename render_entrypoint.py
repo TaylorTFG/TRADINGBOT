@@ -83,11 +83,15 @@ def run_telegram_bot_in_background():
         # Importa e avvia il telegram handler
         from bot.telegram_handler import start_telegram_bot
 
-        # Avvia il telegram bot (blocking call)
-        asyncio.run(start_telegram_bot(bot_token))
+        # Crea un nuovo event loop per il thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
 
-    except ImportError:
-        logger.warning("⚠️ telegram_handler non disponibile, skipping...")
+        # Avvia il telegram bot (blocking call)
+        loop.run_until_complete(start_telegram_bot(bot_token))
+
+    except ImportError as e:
+        logger.warning(f"⚠️ telegram_handler non disponibile: {e}")
     except Exception as e:
         logger.error(f"Errore Telegram bot: {e}", exc_info=True)
 
