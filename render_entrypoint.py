@@ -52,17 +52,61 @@ def health_check():
 @app.route('/api/status')
 def api_status():
     """API per lo stato del bot."""
+    import json
     status_file = Path('data/bot_status.json')
 
-    if status_file.exists():
-        import json
-        try:
-            with open(status_file, 'r') as f:
-                return jsonify(json.load(f))
-        except Exception:
-            pass
+    try:
+        if status_file.exists():
+            with open(status_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return jsonify({
+                    'status': data.get('status', 'unknown'),
+                    'status_it': data.get('status_it', 'SCONOSCIUTO'),
+                    'mode': data.get('mode', 'paper'),
+                    'timestamp': data.get('timestamp', 'N/A')
+                })
+    except Exception as e:
+        logger.error(f"Errore lettura status: {e}")
 
-    return jsonify({'status': 'unknown'}), 503
+    return jsonify({'status': 'initializing', 'message': 'Bot starting...'}), 202
+
+
+@app.route('/api/logs')
+def api_logs():
+    """API per ultimi log."""
+    log_dir = Path('logs')
+    log_files = sorted(log_dir.glob('*.log'), reverse=True)
+
+    if not log_files:
+        return jsonify({'logs': ['No logs available']}), 404
+
+    try:
+        latest_log = log_files[0]
+        with open(latest_log, 'r', encoding='utf-8') as f:
+            lines = f.readlines()[-30:]  # Ultimi 30 log
+
+        return jsonify({
+            'file': latest_log.name,
+            'logs': lines,
+            'count': len(lines)
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/capital')
+def api_capital():
+    """API per il capitale virtuale."""
+    try:
+        vc_file = Path('data/virtual_capital.json')
+        if vc_file.exists():
+            import json
+            with open(vc_file, 'r', encoding='utf-8') as f:
+                return jsonify(json.load(f))
+    except Exception as e:
+        logger.error(f"Errore lettura capitale: {e}")
+
+    return jsonify({'capital_eur': 500, 'capital_usd': 545}), 202
 
 
 def run_telegram_bot_in_background():
