@@ -168,6 +168,30 @@ def run_telegram_bot_in_background():
         logger.error(f"Errore Telegram bot: {e}", exc_info=True)
 
 
+def run_simple_telegram_bot_background():
+    """Avvia il Telegram bot semplice in background."""
+    try:
+        logger.info("📱 Avvio Simple Telegram Bot...")
+
+        # Carica config per ottenere il token
+        with open('config.yaml', 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+
+        bot_token = config.get('telegram', {}).get('bot_token', '')
+
+        if 'YOUR_' in bot_token or not bot_token:
+            logger.warning("⚠️ Telegram bot token non configurato")
+            return
+
+        from bot.simple_telegram import start_simple_telegram_bot
+        start_simple_telegram_bot(bot_token)
+
+    except ImportError:
+        logger.warning("⚠️ simple_telegram module not found")
+    except Exception as e:
+        logger.error(f"Errore Telegram bot: {e}", exc_info=True)
+
+
 def run_bot_in_background():
     """Avvia il bot in un thread separato."""
     global bot_running
@@ -206,6 +230,11 @@ if __name__ == "__main__":
     bot_thread = threading.Thread(target=run_bot_in_background, daemon=True)
     bot_thread.start()
     logger.info("✅ Trading Bot thread avviato")
+
+    # Avvia il TELEGRAM BOT in background thread
+    telegram_thread = threading.Thread(target=run_simple_telegram_bot_background, daemon=True)
+    telegram_thread.start()
+    logger.info("✅ Telegram Bot thread avviato")
 
     # Avvia Flask server NEL MAIN THREAD
     logger.info(f"🌐 Web server in ascolto su 0.0.0.0:{port}")
