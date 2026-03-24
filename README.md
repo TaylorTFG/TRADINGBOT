@@ -1,139 +1,227 @@
-# 📈 Trading Bot Algoritmico - Alpaca Markets
+# ⚡ Crypto Scalping Bot H24 - Alpaca Paper Trading
 
-Bot di trading automatico professionale con analisi tecnica multi-strategia,
-Machine Learning, sentiment delle notizie e dashboard in tempo reale.
+Trading bot automatico per **scalping veloce** su BTC/USD, ETH/USD, SOL/USD con Alpaca paper trading.
 
-## Caratteristiche Principali
+- **Capitale**: €500 ($545 USD)
+- **Asset**: Crypto only (H24 trading)
+- **Ciclo**: 15 secondi
+- **Risk**: SL 0.5%, TP 0.8%, max 50 trade/giorno
+- **Dashboard**: Streamlit (monitoraggio real-time)
 
-### 🎯 3 Strategie Combinate
-1. **Multi-Indicator Confluence** - RSI, MACD, Bollinger, EMA, Volume (soglia 3/5)
-2. **Breakout + Momentum** - Rottura livelli chiave con ADX e ATR dinamici
-3. **News Sentiment** - Analisi NLP con VADER su NewsAPI e RSS feed
+---
 
-### 🗳️ Sistema di Voto Meta-Strategy
-- 3/3 concordano → entrata con size massima (2% capitale)
-- 2/3 concordano → entrata con size ridotta (1% capitale)
-- <2 voti → nessuna operazione
+## ⚡ Caratteristiche Principali
 
-### 🤖 Machine Learning Filter
-- Random Forest Classifier (scikit-learn)
-- 20+ features tecniche + sentiment + temporali
-- Training automatico ogni domenica
-- Confidence minima: 65%
+### 🎯 3 Strategie Scalping (Timeframe 1min)
 
-### 🛡️ Risk Management Completo
-- Stop loss: -1.5% dal prezzo di entrata
-- Trailing stop: attivazione a +1%, distanza 0.8%
-- Take profit: +3%
-- Perdita giornaliera max: -5% → bot si ferma
-- Perdita settimanale max: -10% → pausa 2 giorni
+1. **EMA Crossover** - EMA 5×13×50 + RSI(7) + ATR + Volume >120%
+2. **Bollinger Squeeze** - Squeeze detection + breakout + mean reversion
+3. **VWAP Momentum** - VWAP 1min + MACD(5,13,5) + proximity filter
+
+### 🗳️ Sistema di Voto Intelligente
+- **3/3 concordano** → BUY/SELL con size piena (2% capitale)
+- **2/3 concordano** → BUY/SELL con size ridotta (1% capitale)
+- **Filtro Trend 5min** → Blocca BUY se trend bear, SELL se bull
+
+### 🛡️ Risk Management Aggressivo (Scalping)
+- **Stop Loss**: -0.5% (strettissimo)
+- **Take Profit**: +0.8% (piccoli guadagni frequenti, ratio 1:1.6)
+- **Trailing Stop**: activation +0.4%, distance 0.25%
+- **Position Timeout**: 15 minuti (chiude forzato)
+- **Post-SL Cooldown**: 2 minuti
+- **Daily Loss**: -3% → stop trading
+- **Daily Target**: +2% → size -50%
+- **Max Trades**: 50/giorno
+- **Max Open**: 2 posizioni
 
 ### 📊 Dashboard Streamlit
-- Equity curve in tempo reale
-- Trade aperti con P&L live
-- Storico completo con export CSV
-- Analisi per strategia e heatmap oraria
-- Pannello configurazione grafico
+- **Overview**: Bot status, contatori trade, posizioni aperte con countdown timeout
+- **Configuration**: Tutti i parametri scalping (EMA, BB, VWAP, risk)
+- **Performance 6H**: P&L timeline, win rate, tabella trade chiusi
 
-### 🔔 Notifiche Telegram
-- Trade aperto/chiuso in tempo reale
-- Alert stop loss
-- Report giornaliero ore 22:30
-- Report settimanale venerdì sera
+### 🔔 Notifiche Telegram (Compatte)
+```
+⚡ BUY BTC/USD $84,230 | SL $83,809 | TP $84,903 | 2/3 voti
+✅ BTC/USD +$4.20 (+0.8%) | 8min | EMA Cross
+🛑 BTC/USD -$2.60 (-0.5%) | cooldown 2min
+⏱️ ETH/USD timeout | +$0.80 (+0.15%)
+```
 
-## Asset Supportati
+---
 
-| Tipo | Simboli | Note |
-|------|---------|------|
-| ETF Indici | SPY, QQQ, IWM | Alta liquidità, stabile |
-| Azioni USA | AAPL, MSFT, NVDA, TSLA, AMZN | Alta liquidità |
-| Crypto | BTC/USD, ETH/USD | 24/7, alta volatilità |
+## 🚀 Quick Start
 
-## Installazione Rapida
-
+### 1. Installazione
 ```bash
-# 1. Clona il repository
 git clone https://github.com/TaylorTFG/TRADING-TAYLOR.git
 cd TRADING-TAYLOR
 
-# 2. Installa dipendenze (oppure usa install.bat)
-python -m venv venv
-venv\Scripts\activate
 pip install -r requirements.txt
 
-# 3. Configura le API keys
-# Apri config.yaml e inserisci le credenziali Alpaca
-
-# 4. Avvia il bot
-python main.py bot
+# Configura config.yaml con credenziali Alpaca (paper)
 ```
 
-Vedi **[QUICKSTART.md](QUICKSTART.md)** per istruzioni dettagliate.
+### 2. Avvia Locale
+```bash
+# Terminal 1: Bot
+python main.py
 
-## Struttura del Progetto
+# Terminal 2: Dashboard (http://localhost:8501)
+streamlit run dashboard/app.py
+```
+
+### 3. Deploy Render (Free)
+Vedi **[DEPLOY.md](DEPLOY.md)** per guida completa.
+
+```bash
+# Basta pushare, Render redeploya automaticamente
+git push origin master
+```
+
+---
+
+## 📁 Struttura del Progetto
 
 ```
-TRADING BOT/
-├── main.py                    ← Entry point
-├── config.yaml                ← Configurazione (da editare)
+TRADING-TAYLOR/
+├── config.yaml                ← Parametri scalping (SL, TP, EMA, BB)
 ├── requirements.txt           ← Dipendenze Python
-├── QUICKSTART.md              ← Guida rapida
-├── install.bat                ← Installa tutto automaticamente
-├── start_bot.bat              ← Avvia il bot
-├── start_dashboard.bat        ← Apri dashboard
+├── DEPLOY.md                  ← Guida deploy Render
+├── render.yaml                ← Configurazione Render
+├── main.py                    ← Entry point
+│
 ├── bot/
-│   ├── engine.py              ← Loop principale
-│   ├── broker.py              ← API Alpaca
-│   ├── strategy_confluence.py ← Strategia 1
-│   ├── strategy_breakout.py   ← Strategia 2
-│   ├── strategy_sentiment.py  ← Strategia 3
-│   ├── meta_strategy.py       ← Sistema voto
-│   ├── ml_filter.py           ← Random Forest
-│   ├── risk_manager.py        ← Gestione rischio
-│   ├── news_analyzer.py       ← NLP notizie
-│   ├── market_context.py      ← VIX, macro
-│   ├── notifications.py       ← Telegram
-│   └── database.py            ← SQLite
+│   ├── engine.py              ← Loop 15sec, H24, timeout, trade counter
+│   ├── broker.py              ← Client Alpaca
+│   ├── database.py            ← SQLite trades
+│   ├── risk_manager.py        ← SL/TP/timeout/cooldown/daily limits
+│   ├── notifications.py       ← Telegram alerts
+│   ├── meta_strategy.py       ← Sistema voto + filtro trend 5min
+│   ├── strategy_confluence.py ← EMA Crossover (5/13/50 + RSI 7)
+│   ├── strategy_breakout.py   ← Bollinger Squeeze (20,2)
+│   ├── strategy_sentiment.py  ← VWAP Momentum
+│   ├── market_context.py      ← VIX, macro context
+│   ├── ml_filter.py           ← Disabilitato
+│   └── news_analyzer.py       ← Disabilitato (return score 0)
+│
 ├── dashboard/
-│   └── app.py                 ← Streamlit UI
-├── backtester/
-│   └── engine.py              ← Backtesting
+│   └── app.py                 ← Streamlit (Overview, Config, Performance)
+│
 ├── data/
-│   └── trades.db              ← Database
-├── models/
-│   └── ml_model.pkl           ← Modello ML
+│   ├── trades.db              ← SQLite (auto-created)
+│   ├── virtual_capital.json   ← Capitale aggiornato
+│   └── bot_status.json        ← Status JSON
+│
 └── logs/
-    └── trading_*.log          ← Log giornalieri
+    └── trading_bot.log        ← Log file
 ```
 
-## Configurazione
+---
 
-Il file `config.yaml` contiene tutti i parametri configurabili:
+## ⚙️ Configurazione Scalping
+
+Il file `config.yaml` contiene tutti i parametri:
 
 ```yaml
 trading:
-  mode: "paper"          # "paper" o "live"
-  capital_eur: 500       # Capitale iniziale
+  mode: "paper"                    # Always "paper" for testing
+  capital_eur: 500
+  max_open_positions: 2
+  cycle_interval_seconds: 15       # 15 secondi (non 30)
 
-alpaca:
-  paper:
-    api_key: "YOUR_KEY"
-    api_secret: "YOUR_SECRET"
+assets:
+  crypto:
+    symbols: ["BTC/USD", "ETH/USD", "SOL/USD"]
 
 risk_management:
-  stop_loss_pct: 0.015   # -1.5%
-  take_profit_pct: 0.03  # +3%
-  max_risk_per_trade: 0.02  # 2% per trade
+  stop_loss_pct: 0.005            # -0.5%
+  take_profit_pct: 0.008          # +0.8%
+  trailing_stop:
+    activation_pct: 0.004         # +0.4%
+    trail_pct: 0.0025             # 0.25%
+  daily:
+    max_loss_pct: 0.03            # -3% stop
+    target_profit_pct: 0.02       # +2% size -50%
+    max_trades: 50
+  quality_filters:
+    max_position_duration_min: 15
+    cooldown_after_loss_sec: 120
+
+ml_filter: { enabled: false }      # Disabilitato (troppo lento)
 ```
+
+---
+
+## 📊 Performance Attese
+
+| Metrica | Valore | Note |
+|---------|--------|------|
+| Win Rate | 50-60% | Piccoli guadagni frequenti |
+| Avg Trade Duration | 5-10 min | Veloce scalping |
+| Avg Win | +$0.60-1.20 | Su $545 capitale |
+| Avg Loss | -$0.30-0.80 | Controllato da SL |
+| Daily Target | +$11 | +2% su $545 |
+| Max Daily Loss | -$16.35 | -3%, then stop |
+
+---
+
+## 🔍 Monitoraggio
+
+### Dashboard (Locale)
+```bash
+streamlit run dashboard/app.py
+# Apri http://localhost:8501
+```
+
+### Log File
+```bash
+tail -f logs/trading_bot.log
+```
+
+### Render (Cloud)
+1. Vai https://dashboard.render.com
+2. Seleziona servizio
+3. Menu Logs
+4. Verifica segnali EMA/BB/VWAP
+
+### Telegram Alerts
+Configura `telegram.bot_token` e `chat_id` in config.yaml per ricevere alert real-time.
+
+---
+
+## 🐛 Troubleshooting
+
+**Bot non fa trade**
+- Controlla credenziali Alpaca in config.yaml
+- Verifica log: "CONNECTED TO ALPACA"
+- Check capitale: min $500 richiesto
+
+**Dashboard non carica**
+- Controlla database: `ls data/trades.db`
+- Verifica porta 8501: `lsof -i :8501`
+- Clear cache: `rm -rf ~/.streamlit/`
+
+**Performance lenta su Render**
+- Free Plan ha limiti (sospensione dopo 15 min inattività)
+- Upgrade a Starter Plan ($7/mese) per H24 stabile
+
+---
 
 ## ⚠️ Disclaimer
 
-**Questo software è fornito a scopo educativo e non costituisce consulenza finanziaria.**
+**Questo software è fornito a scopo educativo SOLO.**
 
-Il trading algoritmico comporta rischi significativi di perdita del capitale.
-Testa sempre in modalità **paper trading** prima di usare denaro reale.
+❌ **NON** usare con denaro reale finché non hai:
+1. Testato almeno 30 giorni in paper
+2. Win rate consistently > 50%
+3. Daily loss never > -3%
+4. Daily profit consistently > +1%
+
+Il trading comporta rischi di perdita totale del capitale.
 Le performance passate non garantiscono risultati futuri.
 
 ---
 
-**Linguaggio:** Python 3.11+ | **Broker:** Alpaca Markets | **Dashboard:** Streamlit
+**Tech Stack**: Python 3.11+ | **Broker**: Alpaca Markets | **Dashboard**: Streamlit | **Cloud**: Render
+
+**Last Updated**: 2026-03-24 | **Version**: 2.0 (Crypto Scalping H24)
