@@ -183,11 +183,11 @@ class TradingEngine:
                     time.sleep(60)
                     continue
 
-                # Ciclo di trading
+                # Ciclo di trading (SCALPING: ogni 15 secondi)
                 self._trading_cycle()
 
-                # Attendi prima del prossimo ciclo (30 secondi)
-                time.sleep(30)
+                # Attendi prima del prossimo ciclo (15 secondi per scalping)
+                time.sleep(15)
 
             except KeyboardInterrupt:
                 logger.info("Interruzione manuale ricevuta")
@@ -250,10 +250,8 @@ class TradingEngine:
                 self._close_all_positions("Chiusura fine giornata")
             return
 
-        # --- FASE 2: Verifica orari operativi ---
-        if not self._is_trading_window_active():
-            logger.debug(f"Fuori orario operativo: {now.strftime('%H:%M')}")
-            return
+        # --- FASE 2: SCALPING H24 --- Nessun check orari, opera sempre per crypto ---
+        # (H24 crypto scalping, nessuna pausa oraria)
 
         # --- FASE 3: Verifica limiti giornalieri sul capitale virtuale ---
         current_capital = self._virtual_capital  # Usa capitale virtuale (es. $545), non i $100k Alpaca
@@ -449,8 +447,8 @@ class TradingEngine:
         # --- Analisi Strategia 3: Sentiment ---
         signal_3 = self.strategy_sentiment.analyze(df_with_indicators, symbol)
 
-        # --- Sistema di Voto Meta-Strategy ---
-        vote_result = self.meta_strategy.vote(signal_1, signal_2, signal_3, symbol)
+        # --- Sistema di Voto Meta-Strategy (con filtro trend 5min) ---
+        vote_result = self.meta_strategy.vote(signal_1, signal_2, signal_3, symbol, df_5min)
         final_signal = vote_result['final_signal']
         vote_score = vote_result['vote_score']
 
@@ -469,15 +467,19 @@ class TradingEngine:
             logger.debug(f"[{symbol}] HOLD - {vote_result['reason']}")
             return
 
-        # --- Filtro ML ---
-        sentiment_score = signal_3.get('sentiment_score', 0) or 0
-        vix_level = self.market_context.get_vix_level()
+        # --- Filtro ML (DISABILITATO per scalping) ---
+        # ML filter è troppo lento per scalping 1min, manteniamo approvazione automatica
+        if self.ml_filter.config.get('ml_filter', {}).get('enabled', False):
+            sentiment_score = signal_3.get('sentiment_score', 0) or 0
+            vix_level = self.market_context.get_vix_level()
+            ml_result = self.ml_filter.predict(df_with_indicators, sentiment_score, vix_level)
 
-        ml_result = self.ml_filter.predict(df_with_indicators, sentiment_score, vix_level)
-
-        if not ml_result['approved']:
-            logger.info(f"[{symbol}] Segnale RIGETTATO dal ML: {ml_result['reason']}")
-            return
+            if not ml_result['approved']:
+                logger.info(f"[{symbol}] Segnale RIGETTATO dal ML: {ml_result['reason']}")
+                return
+        else:
+            # ML disabled: approva automaticamente il segnale
+            ml_result = {'approved': True, 'confidence': 1.0, 'reason': 'ML disabled for scalping'}
 
         # --- Calcolo Position Sizing ---
         current_price = self.broker.get_latest_price(symbol)
@@ -587,6 +589,9 @@ class TradingEngine:
                 'vote_score': vote_result.get('buy_votes', 0)
             })
 
+            # Incrementa contatore trade giornaliero (SCALPING)
+            self.risk_manager.increment_trade_count()
+
             logger.info(f"[{symbol}] Ordine eseguito: trade ID={trade_id}")
 
         else:
@@ -616,12 +621,21 @@ class TradingEngine:
                 if not current_price:
                     continue
 
+                # SCALPING: Verifica timeout posizione (15 minuti max)
+                if self.risk_manager.should_close_by_timeout(trade):
+                    logger.warning(f"[{symbol}] TIMEOUT posizione (> 15 min)")
+                    self._close_position(symbol, trade, "Timeout scalping (15min)")
+                    self.notifier.notify_timeout_close(trade, current_price)
+                    continue
+
                 # Verifica stop loss
                 if self.risk_manager.should_stop_loss(trade, current_price):
                     pnl = (current_price - trade['entry_price']) * trade['quantity']
                     logger.warning(f"[{symbol}] STOP LOSS scattato a ${current_price:.2f}")
                     self._close_position(symbol, trade, "Stop loss")
                     self.notifier.notify_stop_loss(symbol, current_price, pnl)
+                    # SCALPING: Avvia cooldown di 2 minuti dopo lo stop loss
+                    self.risk_manager.set_stop_loss_cooldown()
                     continue
 
                 # Verifica take profit

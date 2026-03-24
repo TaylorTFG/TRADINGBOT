@@ -104,7 +104,7 @@ class TelegramNotifier:
 
     def notify_trade_open(self, trade_data: Dict) -> bool:
         """
-        Notifica apertura di un nuovo trade.
+        Notifica apertura di un nuovo trade (compatta per scalping).
 
         Args:
             trade_data: Dati del trade aperto
@@ -115,35 +115,23 @@ class TelegramNotifier:
         symbol = trade_data.get('symbol', 'N/A')
         side = trade_data.get('side', 'N/A').upper()
         price = trade_data.get('entry_price', 0)
-        qty = trade_data.get('quantity', 0)
-        strategy = trade_data.get('strategy', 'N/A')
         stop_loss = trade_data.get('stop_loss', 0)
         take_profit = trade_data.get('take_profit', 0)
         vote_score = trade_data.get('vote_score', 0)
 
-        # Emoji in base alla direzione
-        emoji = "🟢" if side == "BUY" else "🔴"
-        side_it = "ACQUISTO" if side == "BUY" else "VENDITA"
+        # Emoji compatte per scalping
+        emoji = "⚡" if side == "BUY" else "💥"
 
         message = (
-            f"{emoji} *TRADE APERTO*\n"
-            f"━━━━━━━━━━━━━━━━━\n"
-            f"📊 Asset: `{symbol}`\n"
-            f"📈 Direzione: *{side_it}*\n"
-            f"💰 Prezzo entrata: `${price:.2f}`\n"
-            f"📦 Quantità: `{qty}`\n"
-            f"🎯 Strategia: `{strategy}`\n"
-            f"🗳️ Voti: `{vote_score}/3`\n"
-            f"🛑 Stop Loss: `${stop_loss:.2f}`\n"
-            f"✅ Take Profit: `${take_profit:.2f}`\n"
-            f"⏰ Ora: `{datetime.now(IT_TZ).strftime('%H:%M:%S')}`"
+            f"{emoji} {side} {symbol} ${price:.2f} | "
+            f"SL ${stop_loss:.2f} | TP ${take_profit:.2f} | {vote_score}/3 voti"
         )
 
         return self._send_message(message)
 
     def notify_trade_close(self, trade_data: Dict, exit_reason: str) -> bool:
         """
-        Notifica chiusura di un trade con risultato.
+        Notifica chiusura di un trade (compatta per scalping).
 
         Args:
             trade_data: Dati del trade chiuso
@@ -155,45 +143,41 @@ class TelegramNotifier:
         symbol = trade_data.get('symbol', 'N/A')
         pnl = trade_data.get('pnl', 0)
         pnl_pct = trade_data.get('pnl_pct', 0) * 100
-        entry_price = trade_data.get('entry_price', 0)
-        exit_price = trade_data.get('exit_price', 0)
-        strategy = trade_data.get('strategy', 'N/A')
 
-        # Emoji in base al risultato
-        if pnl > 0:
-            emoji = "✅"
-            result_emoji = "💚"
-        else:
-            emoji = "❌"
-            result_emoji = "🔴"
+        # Emoji compatte
+        emoji = "✅" if pnl > 0 else "❌"
 
         message = (
-            f"{emoji} *TRADE CHIUSO*\n"
-            f"━━━━━━━━━━━━━━━━━\n"
-            f"📊 Asset: `{symbol}`\n"
-            f"🎯 Strategia: `{strategy}`\n"
-            f"📥 Entrata: `${entry_price:.2f}`\n"
-            f"📤 Uscita: `${exit_price:.2f}`\n"
-            f"📋 Motivo: `{exit_reason}`\n"
-            f"{result_emoji} *P&L: {'+' if pnl >= 0 else ''}{pnl:.2f}$ ({'+' if pnl_pct >= 0 else ''}{pnl_pct:.2f}%)*\n"
-            f"⏰ Ora: `{datetime.now(IT_TZ).strftime('%H:%M:%S')}`"
+            f"{emoji} {symbol} {'+' if pnl >= 0 else ''}{pnl:.2f}$ "
+            f"({'+' if pnl_pct >= 0 else ''}{pnl_pct:.2f}%) | {exit_reason}"
         )
 
         return self._send_message(message)
 
     def notify_stop_loss(self, symbol: str, price: float, pnl: float) -> bool:
-        """Alert immediato per stop loss scattato."""
+        """Alert compatto per stop loss scattato + cooldown avvio."""
         if not self.notifications.get('stop_loss_hit', True):
             return True
 
         message = (
-            f"🚨 *STOP LOSS SCATTATO*\n"
-            f"━━━━━━━━━━━━━━━━━\n"
-            f"📊 Asset: `{symbol}`\n"
-            f"💰 Prezzo: `${price:.2f}`\n"
-            f"🔴 Perdita: `{pnl:.2f}$`\n"
-            f"⏰ Ora: `{datetime.now(IT_TZ).strftime('%H:%M:%S')}`\n"
-            f"⚠️ _Monitorare la situazione_"
+            f"🛑 {symbol} {pnl:.2f}$ | cooldown 2min"
+        )
+
+        return self._send_message(message)
+
+    def notify_timeout_close(self, trade: Dict, price: float) -> bool:
+        """Notifica chiusura per timeout posizione (15min)."""
+        if not self.notifications.get('timeout_close', True):
+            return True
+
+        symbol = trade.get('symbol', 'N/A')
+        pnl = (price - trade.get('entry_price', 0)) * trade.get('quantity', 1)
+        pnl_pct = ((price - trade.get('entry_price', 0)) / trade.get('entry_price', 1)) * 100 if trade.get('entry_price') > 0 else 0
+
+        emoji = "✅" if pnl > 0 else "❌"
+
+        message = (
+            f"⏱️ {symbol} timeout | {emoji} {pnl:+.2f}$ ({pnl_pct:+.2f}%)"
         )
 
         return self._send_message(message)

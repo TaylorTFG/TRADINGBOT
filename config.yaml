@@ -19,10 +19,10 @@ trading:
   eur_usd_rate: 1.09
 
   # Numero massimo di posizioni aperte contemporaneamente
-  max_open_positions: 6
+  max_open_positions: 2
 
   # Chiusura forzata posizioni prima della chiusura mercato (ora IT)
-  force_close_time: "21:45"
+  force_close_time: "23:58"
 
   # Fuso orario operativo
   timezone: "Europe/Rome"
@@ -49,12 +49,12 @@ alpaca:
 assets:
   # Priorità 1: ETF Indici + Settoriali (diversificazione, trend solidi)
   etf:
-    enabled: true
+    enabled: false
     symbols: ["SPY", "QQQ", "IWM", "XLK", "XLV", "XLF", "GLD"]
 
   # Priorità 2: Azioni ad alta liquidità (blue-chip + growth)
   stocks:
-    enabled: true
+    enabled: false
     symbols: ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "GOOGL", "META", "NFLX", "AMD", "INTC"]
 
   # Priorità 3: Crypto (24/7, alta volatilità, trend forti)
@@ -63,8 +63,8 @@ assets:
     symbols: ["BTC/USD", "ETH/USD", "SOL/USD"]
 
   # Numero massimo di asset da analizzare contemporaneamente
-  # IMPORTANTE: 20 è il sweet spot per qualità segnali + diversificazione
-  max_assets_per_cycle: 20
+  # SCALPING: analizziamo solo 3 crypto H24
+  max_assets_per_cycle: 3
 
 # ------------------------------------------------------------
 # FINESTRE ORARIE OPERATIVE (ora italiana)
@@ -72,97 +72,92 @@ assets:
 # ------------------------------------------------------------
 trading_hours:
   windows:
-    - start: "15:30"
-      end: "17:00"
-      description: "Apertura mercati USA"
-    - start: "19:00"
-      end: "21:00"
-      description: "Sessione americana centrale"
-    - start: "21:00"
-      end: "21:45"
-      description: "Momentum finale"
+    - start: "00:01"
+      end: "23:59"
+      description: "H24 Crypto Scalping"
 
-  # Ore da evitare (bassa liquidità - lunch americano)
-  avoid:
-    - start: "17:00"
-      end: "19:00"
-      description: "Lunch americano"
+  # Nessuna pausa per crypto 24/7
+  avoid: []
 
 # ------------------------------------------------------------
-# STRATEGIA 1: MULTI-INDICATOR CONFLUENCE
+# STRATEGIA 1: EMA CROSSOVER SCALPING (1min)
 # ------------------------------------------------------------
 strategy_confluence:
   enabled: true
 
-  # Soglia minima indicatori concordi per operare (su 5 totali)
-  min_score: 3
+  # Soglia minima indicatori concordi per operare (su 3 strategie)
+  min_score: 2
 
-  # RSI - Relative Strength Index
+  # RSI - Relative Strength Index (periodo 7 per reattività scalping)
   rsi:
-    period: 14
-    oversold: 30     # Sotto questa soglia → segnale BUY
-    overbought: 70   # Sopra questa soglia → segnale SELL
+    period: 7
+    oversold: 35     # RSI < 35 per BUY
+    overbought: 65   # RSI > 65 per SELL
 
-  # MACD - Moving Average Convergence Divergence
-  macd:
-    fast_period: 12
-    slow_period: 26
-    signal_period: 9
-
-  # Bollinger Bands
-  bollinger:
-    period: 20
-    std_dev: 2
-
-  # EMA - Exponential Moving Average
+  # EMA - Exponential Moving Average (veloce per scalping 1min)
   ema:
-    fast_period: 20
-    slow_period: 50
+    fast_period: 5      # EMA velocissima
+    slow_period: 13     # EMA secondaria
+    trend_period: 50    # EMA per trend filter
+
+  # ATR - Average True Range (check mercato non piatto)
+  atr:
+    period: 7
+    min_volatility_pct: 0.0005  # ATR deve essere > 0.05% del prezzo
 
   # Volume filter
   volume:
-    lookback_period: 20
-    multiplier: 1.5   # Volume deve essere 150% della media
+    lookback_period: 10
+    multiplier: 1.2   # Volume deve essere > 120% della media
 
 # ------------------------------------------------------------
-# STRATEGIA 2: BREAKOUT + MOMENTUM
+# STRATEGIA 2: BOLLINGER BAND SQUEEZE SCALPING (1min)
 # ------------------------------------------------------------
 strategy_breakout:
   enabled: true
 
-  # Numero di giorni per calcolare supporti e resistenze
-  lookback_days: 20
+  # Bollinger Bands parametri
+  bollinger:
+    period: 20
+    std_dev: 2.0
 
-  # Volume minimo per confermare il breakout (200% della media)
-  volume_multiplier: 2.0
+  # Squeeze detection
+  squeeze:
+    bandwidth_threshold: 0.005  # bandwidth < 0.5% = squeeze
 
-  # ADX minimo per confermare trend forte (non laterale)
-  adx_min: 25
+  # Breakout logica
+  breakout:
+    volume_multiplier: 1.5   # Volume spike per conferma breakout
 
-  # Periodo ATR per stop e target dinamici
-  atr_period: 14
+  # Mean reversion logica
+  mean_reversion:
+    rsi_oversold: 30
+    rsi_overbought: 70
 
-  # Attendi chiusura candela sopra il livello (anti falso breakout)
-  wait_candle_close: true
+  # Target: Bollinger middle per squeeze, opposta banda per breakout
+  target_type: "dynamic"
 
 # ------------------------------------------------------------
-# STRATEGIA 3: NEWS SENTIMENT
+# STRATEGIA 3: VWAP MOMENTUM SCALPING (1min)
+# (rimpiazza NEWS SENTIMENT — inutile per crypto scalping)
 # ------------------------------------------------------------
 strategy_sentiment:
   enabled: true
 
-  # Soglia sentiment per segnale BUY forte
-  bullish_threshold: 0.6
+  # VWAP - Volume Weighted Average Price
+  vwap:
+    reset_daily: true  # Reset VWAP ogni inizio giornata
+    price_proximity_pct: 0.003  # Operare solo se price entro 0.3% VWAP
 
-  # Soglia sentiment per bloccare acquisti
-  bearish_threshold: -0.6
+  # MACD per momentum confirmation
+  macd:
+    fast_period: 5
+    slow_period: 13
+    signal_period: 5
 
-  # Peso notizie recenti vs. notizie vecchie
-  recent_news_weight: 0.6    # Ultime 2 ore
-  older_news_weight: 0.4     # Ultime 24 ore
-
-  # Finestra temporale notizie in ore
-  news_window_hours: 24
+  # VWAP crossover logica
+  bullish_threshold: 0.1   # Minimo momentum bullish
+  bearish_threshold: -0.1  # Minimo momentum bearish
 
 # ------------------------------------------------------------
 # API ESTERNE PER NEWS
@@ -175,19 +170,19 @@ external_apis:
 
   alpha_vantage:
     api_key: "YOUR_ALPHAVANTAGE_KEY"
-    enabled: true
+    enabled: false
 
 # ------------------------------------------------------------
 # MACHINE LEARNING FILTER
 # ------------------------------------------------------------
 ml_filter:
-  enabled: true
+  enabled: false
 
   # Confidence minima ML per validare segnale (0-1)
   min_confidence: 0.65
 
   # Riallenamento automatico ogni domenica
-  auto_retrain: true
+  auto_retrain: false
   retrain_day: "sunday"
 
   # Mesi di dati storici per il training
@@ -205,27 +200,34 @@ risk_management:
   # Rischio massimo per singolo trade (% del capitale totale)
   max_risk_per_trade: 0.02      # 2%
 
-  # Stop loss iniziale dal prezzo di entrata
-  stop_loss_pct: 0.015          # -1.5%
+  # Stop loss iniziale dal prezzo di entrata (SCALPING: strettissimo)
+  stop_loss_pct: 0.005          # -0.5%
 
-  # Take profit dal prezzo di entrata
-  take_profit_pct: 0.03         # +3%
+  # Take profit dal prezzo di entrata (SCALPING: piccoli guadagni)
+  take_profit_pct: 0.008        # +0.8% (ratio 1:1.6)
 
-  # Trailing stop
+  # Trailing stop (attivazione a +0.4%, distanza 0.25%)
   trailing_stop:
     enabled: true
-    activation_pct: 0.01        # Si attiva quando profitto >= +1%
-    trail_pct: 0.008            # Distanza trailing stop 0.8%
+    activation_pct: 0.004       # Si attiva quando profitto >= +0.4%
+    trail_pct: 0.0025           # Distanza trailing stop 0.25%
 
-  # Limiti giornalieri
+  # Limiti giornalieri SCALPING
   daily:
-    max_loss_pct: 0.05          # -5% → bot si ferma
-    target_profit_pct: 0.03     # +3% → riduce size del 50%
+    max_loss_pct: 0.03          # -3% = $16.35 (stop trading)
+    target_profit_pct: 0.02     # +2% = $10.9 (continua, riduci size 50%)
+    max_trades: 50              # Max 50 trade al giorno
 
   # Limiti settimanali
   weekly:
-    max_loss_pct: 0.10          # -10% → pausa 2 giorni automatica
-    pause_days: 2
+    max_loss_pct: 0.08          # -8% per settimana
+    pause_days: 1
+
+  # Filtro qualità segnale SCALPING
+  quality_filters:
+    max_spread_pct: 0.001       # Skip se spread > 0.1%
+    cooldown_after_loss_sec: 120  # 2 minuti dopo SL
+    max_position_duration_min: 15  # Timeout posizione a 15 min
 
   # Position sizing
   sizing:
@@ -263,17 +265,19 @@ telegram:
   bot_token: "8394682983:AAEd-tMhskER95c6Q3a4Mxa2n6h9gAuC51o"
   chat_id: "1749236118"
 
-  # Tipi di notifica da inviare
+  # Tipi di notifica da inviare (SCALPING: notifiche compatte)
   notifications:
-    trade_open: true        # Trade aperto
-    trade_close: true       # Trade chiuso
-    stop_loss_hit: true     # Stop loss scattato
+    trade_open: true        # Trade aperto (compatto)
+    trade_close: true       # Trade chiuso (compatto)
+    stop_loss_hit: true     # Stop loss scattato + cooldown
+    timeout_close: true     # Timeout posizione (15 min)
     daily_drawdown: true    # Drawdown giornaliero raggiunto
-    daily_report: true      # Report giornaliero ore 22:30
+    daily_report: false     # Disabilitato, usiamo report 6h
     weekly_report: true     # Report settimanale venerdì
 
-  # Orario report giornaliero (ora italiana)
-  daily_report_time: "22:30"
+  # Report ogni 6 ore (non solo sera)
+  report_interval_hours: 6
+  report_times: ["06:00", "12:00", "18:00", "00:00"]
 
   # Orario report settimanale (venerdì sera)
   weekly_report_time: "22:00"

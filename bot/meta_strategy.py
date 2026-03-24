@@ -5,6 +5,7 @@
 # ============================================================
 
 import logging
+import pandas as pd
 from typing import Dict, List, Optional
 from datetime import datetime
 
@@ -13,13 +14,16 @@ logger = logging.getLogger(__name__)
 
 class MetaStrategy:
     """
-    Sistema di voto che combina le 3 strategie.
+    Sistema di voto che combina le 3 strategie con filtro trend 5min.
 
     Regole:
     - 3/3 concordano BUY → entrata con size massima (2% capitale)
     - 2/3 concordano BUY → entrata con size ridotta (1% capitale)
     - 1/3 o meno → nessuna operazione (HOLD)
-    - Qualsiasi voto SELL su posizione aperta → valuta uscita
+
+    Filtro Trend 5min (protegge da falsi segnali):
+    - Se trend 5min è BEARISH → blocca segnali BUY 1min
+    - Se trend 5min è BULLISH → blocca segnali SELL 1min
     """
 
     def __init__(self, config: dict):
@@ -31,12 +35,52 @@ class MetaStrategy:
         """
         self.config = config
 
+        # Cache per trend 5min (evita ricalcolo)
+        self._trend_cache = {}  # {symbol: {'trend': ..., 'timestamp': ...}}
+
+    def calculate_5min_trend(self, df_5min) -> str:
+        """
+        Calcola il trend su timeframe 5min usando EMA 20.
+
+        Usa EMA 20 vs close:
+        - Se close > EMA20 → trend BULLISH
+        - Se close < EMA20 → trend BEARISH
+        - Altrimenti → NEUTRAL
+
+        Args:
+            df_5min: DataFrame 5min con OHLCV
+
+        Returns:
+            String: 'BULLISH', 'BEARISH', o 'NEUTRAL'
+        """
+        if df_5min is None or len(df_5min) < 25:
+            return 'NEUTRAL'
+
+        try:
+            close = df_5min['close']
+            ema20 = close.ewm(span=20, adjust=False).mean()
+
+            last_close = float(close.iloc[-1])
+            last_ema20 = float(ema20.iloc[-1])
+
+            if pd.notna(last_ema20) and last_ema20 > 0:
+                if last_close > last_ema20 * 1.0005:  # Margine 0.05% per evitare fluttuazioni
+                    return 'BULLISH'
+                elif last_close < last_ema20 * 0.9995:
+                    return 'BEARISH'
+
+            return 'NEUTRAL'
+        except Exception as e:
+            logger.warning(f"Errore calcolo trend 5min: {e}")
+            return 'NEUTRAL'
+
     def vote(
         self,
         confluence_signal: Dict,
         breakout_signal: Dict,
         sentiment_signal: Dict,
-        symbol: str
+        symbol: str,
+        df_5min=None
     ) -> Dict:
         """
         Raccoglie i voti dalle 3 strategie e calcola il segnale finale.
@@ -50,12 +94,43 @@ class MetaStrategy:
         Returns:
             Dizionario con final_signal, vote_score, action, details
         """
+        # ---- FILTRO TREND 5min ----
+        # Questo filtro protegge da falsi segnali contro il trend di breve periodo
+        trend_5min = self.calculate_5min_trend(df_5min) if df_5min is not None else 'NEUTRAL'
+
         # Estrai i voti
         votes = {
             'confluence': confluence_signal.get('signal', 'HOLD'),
             'breakout': breakout_signal.get('signal', 'HOLD'),
             'sentiment': sentiment_signal.get('signal', 'HOLD'),
         }
+
+        # ---- APPLICA FILTRO TREND 5min ----
+        # Se trend 5min è BEARISH, blocca i segnali BUY (aspetta un segnale SELL prima)
+        if trend_5min == 'BEARISH' and votes['confluence'] == 'BUY':
+            votes['confluence'] = 'HOLD'
+            logger.debug(f"[{symbol}] Segnale BUY bloccato: trend 5min è BEARISH")
+
+        if trend_5min == 'BEARISH' and votes['breakout'] == 'BUY':
+            votes['breakout'] = 'HOLD'
+            logger.debug(f"[{symbol}] Segnale BUY bloccato: trend 5min è BEARISH")
+
+        if trend_5min == 'BEARISH' and votes['sentiment'] == 'BUY':
+            votes['sentiment'] = 'HOLD'
+            logger.debug(f"[{symbol}] Segnale BUY bloccato: trend 5min è BEARISH")
+
+        # Se trend 5min è BULLISH, blocca i segnali SELL (aspetta un segnale BUY prima)
+        if trend_5min == 'BULLISH' and votes['confluence'] == 'SELL':
+            votes['confluence'] = 'HOLD'
+            logger.debug(f"[{symbol}] Segnale SELL bloccato: trend 5min è BULLISH")
+
+        if trend_5min == 'BULLISH' and votes['breakout'] == 'SELL':
+            votes['breakout'] = 'HOLD'
+            logger.debug(f"[{symbol}] Segnale SELL bloccato: trend 5min è BULLISH")
+
+        if trend_5min == 'BULLISH' and votes['sentiment'] == 'SELL':
+            votes['sentiment'] = 'HOLD'
+            logger.debug(f"[{symbol}] Segnale SELL bloccato: trend 5min è BULLISH")
 
         # Conta i voti per BUY, SELL, HOLD
         buy_votes = sum(1 for v in votes.values() if v == 'BUY')
@@ -161,6 +236,7 @@ class MetaStrategy:
             'symbol': symbol,
             'timestamp': datetime.now().isoformat(),
             'votes': votes,
+            'trend_5min': trend_5min,  # Aggiungi il trend 5min ai risultati
             'signal_details': signal_details,
             'strategy_name': self._get_leading_strategy(votes, confluence_signal, breakout_signal, sentiment_signal)
         }

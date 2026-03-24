@@ -1,13 +1,12 @@
 # ============================================================
-# STRATEGIA 1: MULTI-INDICATOR CONFLUENCE
-# Opera solo quando almeno 3 indicatori su 5 concordano:
-# RSI, MACD, Bollinger Bands, EMA crossover, Volume
+# STRATEGIA 1: EMA CROSSOVER SCALPING (1min)
+# Optimized for crypto scalping: fast MA crosses with RSI confirmation
 # ============================================================
 
 import logging
 import pandas as pd
 import numpy as np
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict
 from datetime import datetime
 
 try:
@@ -22,70 +21,56 @@ logger = logging.getLogger(__name__)
 
 class ConfluenceStrategy:
     """
-    Strategia di confluenza multi-indicatore.
+    EMA Crossover Scalping Strategy.
 
-    Calcola un punteggio da 0 a 5 basato su:
-    - RSI(14): ipervenduto/ipercomprato
-    - MACD(12,26,9): crossover bullish/bearish
-    - Bollinger Bands(20,2): prezzo fuori banda
-    - EMA crossover (20/50): trend rialzista/ribassista
-    - Volume: conferma con volume superiore alla media
+    Per candele 1min:
+    - EMA 5 (molto veloce)
+    - EMA 13 (veloce)
+    - EMA 50 (trend general)
+    - RSI periodo 7 (molto reattivo)
+    - ATR per escludere mercati piatti (<0.05%)
+    - Volume: >120% media 10 periodi
 
-    Opera solo se il punteggio >= soglia minima (default 3/5)
+    Segnali:
+    - BUY: EMA5 incrocia sopra EMA13 + RSI < 35 + Volume > 120%
+    - SELL: EMA5 incrocia sotto EMA13 + RSI > 65 + Volume > 120%
+    - HOLD: Nessun crossover valido
     """
 
     def __init__(self, config: dict):
-        """
-        Inizializza la strategia di confluenza.
-
-        Args:
-            config: Configurazione dal config.yaml
-        """
+        """Inizializza la strategia EMA Crossover."""
         self.config = config
         self.strategy_config = config.get('strategy_confluence', {})
-        self.min_score = self.strategy_config.get('min_score', 3)
+        self.min_score = self.strategy_config.get('min_score', 2)
         self.enabled = self.strategy_config.get('enabled', True)
 
-        # Parametri RSI
+        # Parametri RSI (SCALPING: periodo 7, molto reattivo)
         rsi_cfg = self.strategy_config.get('rsi', {})
-        self.rsi_period = rsi_cfg.get('period', 14)
-        self.rsi_oversold = rsi_cfg.get('oversold', 30)
-        self.rsi_overbought = rsi_cfg.get('overbought', 70)
+        self.rsi_period = rsi_cfg.get('period', 7)
+        self.rsi_oversold = rsi_cfg.get('oversold', 35)
+        self.rsi_overbought = rsi_cfg.get('overbought', 65)
 
-        # Parametri MACD
-        macd_cfg = self.strategy_config.get('macd', {})
-        self.macd_fast = macd_cfg.get('fast_period', 12)
-        self.macd_slow = macd_cfg.get('slow_period', 26)
-        self.macd_signal = macd_cfg.get('signal_period', 9)
-
-        # Parametri Bollinger Bands
-        bb_cfg = self.strategy_config.get('bollinger', {})
-        self.bb_period = bb_cfg.get('period', 20)
-        self.bb_std = bb_cfg.get('std_dev', 2)
-
-        # Parametri EMA
+        # Parametri EMA (per scalping 1min)
         ema_cfg = self.strategy_config.get('ema', {})
-        self.ema_fast = ema_cfg.get('fast_period', 20)
-        self.ema_slow = ema_cfg.get('slow_period', 50)
+        self.ema_fast = ema_cfg.get('fast_period', 5)        # EMA5 velocissima
+        self.ema_mid = ema_cfg.get('slow_period', 13)        # EMA13 secondaria
+        self.ema_trend = ema_cfg.get('trend_period', 50)     # EMA50 trend filter
+
+        # Parametri ATR (per escludere mercati piatti)
+        atr_cfg = self.strategy_config.get('atr', {})
+        self.atr_period = atr_cfg.get('period', 7)
+        self.min_volatility_pct = atr_cfg.get('min_volatility_pct', 0.0005)  # 0.05%
 
         # Parametri Volume
         vol_cfg = self.strategy_config.get('volume', {})
-        self.vol_period = vol_cfg.get('lookback_period', 20)
-        self.vol_multiplier = vol_cfg.get('multiplier', 1.5)
+        self.vol_period = vol_cfg.get('lookback_period', 10)
+        self.vol_multiplier = vol_cfg.get('multiplier', 1.2)   # 120%
 
-        logger.info(f"ConfluenceStrategy inizializzata (soglia: {self.min_score}/5)")
+        logger.info(f"ConfluenceStrategy (EMA Crossover) inizializzata")
 
     def calculate_indicators(self, df: pd.DataFrame) -> Optional[pd.DataFrame]:
-        """
-        Calcola tutti gli indicatori tecnici sul DataFrame.
-
-        Args:
-            df: DataFrame con colonne OHLCV (open, high, low, close, volume)
-
-        Returns:
-            DataFrame con gli indicatori calcolati
-        """
-        if df is None or len(df) < max(self.ema_slow, self.bb_period, self.vol_period) + 10:
+        """Calcola indicatori per EMA Crossover Scalping."""
+        if df is None or len(df) < max(self.ema_trend, self.vol_period) + 10:
             logger.warning("Dati insufficienti per calcolare gli indicatori")
             return None
 
@@ -97,52 +82,38 @@ class ConfluenceStrategy:
             low = df['low']
             volume = df['volume']
 
-            if TA_AVAILABLE:
-                # RSI usando libreria ta
-                df['rsi'] = ta.momentum.RSIIndicator(close, window=self.rsi_period).rsi()
-
-                # MACD
-                macd = ta.trend.MACD(
-                    close,
-                    window_fast=self.macd_fast,
-                    window_slow=self.macd_slow,
-                    window_sign=self.macd_signal
-                )
-                df['macd'] = macd.macd()
-                df['macd_signal'] = macd.macd_signal()
-                df['macd_hist'] = macd.macd_diff()
-
-                # Bollinger Bands
-                bb = ta.volatility.BollingerBands(
-                    close,
-                    window=self.bb_period,
-                    window_dev=self.bb_std
-                )
-                df['bb_upper'] = bb.bollinger_hband()
-                df['bb_middle'] = bb.bollinger_mavg()
-                df['bb_lower'] = bb.bollinger_lband()
-
-                # ATR (per risk management)
-                df['atr'] = ta.volatility.AverageTrueRange(
-                    high, low, close, window=14
-                ).average_true_range()
-
-                # ADX (per breakout strategy)
-                adx = ta.trend.ADXIndicator(high, low, close, window=14)
-                df['adx'] = adx.adx()
-
-            else:
-                # Calcoli manuali come fallback
-                df = self._calculate_manual(df)
-
-            # EMA calcolata sempre manualmente (più semplice)
+            # ---- EMA (core della strategia) ----
             df[f'ema_{self.ema_fast}'] = close.ewm(span=self.ema_fast, adjust=False).mean()
-            df[f'ema_{self.ema_slow}'] = close.ewm(span=self.ema_slow, adjust=False).mean()
-            df['ema200'] = close.ewm(span=200, adjust=False).mean()
+            df[f'ema_{self.ema_mid}'] = close.ewm(span=self.ema_mid, adjust=False).mean()
+            df[f'ema_{self.ema_trend}'] = close.ewm(span=self.ema_trend, adjust=False).mean()
 
-            # Volume media mobile
+            # ---- RSI (confirmazione) ----
+            if TA_AVAILABLE:
+                df['rsi'] = ta.momentum.RSIIndicator(close, window=self.rsi_period).rsi()
+            else:
+                # RSI manuale
+                delta = close.diff()
+                gain = (delta.where(delta > 0, 0)).rolling(window=self.rsi_period).mean()
+                loss = (-delta.where(delta < 0, 0)).rolling(window=self.rsi_period).mean()
+                rs = gain / loss.replace(0, np.finfo(float).eps)
+                df['rsi'] = 100 - (100 / (1 + rs))
+
+            # ---- ATR (per escludere mercati piatti) ----
+            if TA_AVAILABLE:
+                df['atr'] = ta.volatility.AverageTrueRange(
+                    high, low, close, window=self.atr_period
+                ).average_true_range()
+            else:
+                # ATR manuale
+                tr1 = high - low
+                tr2 = (high - close.shift(1)).abs()
+                tr3 = (low - close.shift(1)).abs()
+                true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+                df['atr'] = true_range.rolling(window=self.atr_period).mean()
+
+            # ---- Volume (confirmazione segnale) ----
             df['volume_ma'] = volume.rolling(window=self.vol_period).mean()
-            df['volume_ratio'] = volume / df['volume_ma']
+            df['volume_ratio'] = volume / df['volume_ma'].replace(0, 1)
 
             return df
 
@@ -150,200 +121,154 @@ class ConfluenceStrategy:
             logger.error(f"Errore calcolo indicatori: {e}")
             return None
 
-    def _calculate_manual(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Calcolo manuale degli indicatori senza libreria ta."""
-        close = df['close']
-        high = df['high']
-        low = df['low']
-
-        # RSI manuale
-        delta = close.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=self.rsi_period).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=self.rsi_period).mean()
-        rs = gain / loss.replace(0, np.finfo(float).eps)
-        df['rsi'] = 100 - (100 / (1 + rs))
-
-        # MACD manuale
-        ema_fast = close.ewm(span=self.macd_fast, adjust=False).mean()
-        ema_slow = close.ewm(span=self.macd_slow, adjust=False).mean()
-        df['macd'] = ema_fast - ema_slow
-        df['macd_signal'] = df['macd'].ewm(span=self.macd_signal, adjust=False).mean()
-        df['macd_hist'] = df['macd'] - df['macd_signal']
-
-        # Bollinger Bands manuale
-        df['bb_middle'] = close.rolling(window=self.bb_period).mean()
-        std = close.rolling(window=self.bb_period).std()
-        df['bb_upper'] = df['bb_middle'] + (std * self.bb_std)
-        df['bb_lower'] = df['bb_middle'] - (std * self.bb_std)
-
-        # ATR manuale
-        tr1 = high - low
-        tr2 = (high - close.shift(1)).abs()
-        tr3 = (low - close.shift(1)).abs()
-        true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-        df['atr'] = true_range.rolling(window=14).mean()
-
-        # ADX semplificato
-        df['adx'] = 25.0  # Valore neutro se non calcolabile
-
-        return df
-
     def analyze(self, df: pd.DataFrame, symbol: str) -> Dict:
         """
-        Analizza i dati e genera il segnale di trading.
+        Analizza il crossover EMA con confirmazione RSI.
 
-        Args:
-            df: DataFrame con dati OHLCV
-            symbol: Simbolo dell'asset
-
-        Returns:
-            Dizionario con signal, score, details
+        Logica SCALPING:
+        - BUY: EMA5 incrocia sopra EMA13 + RSI < 35 + Volume > 120% + ATR > min_vol
+        - SELL: EMA5 incrocia sotto EMA13 + RSI > 65 + Volume > 120% + ATR > min_vol
         """
         if not self.enabled:
             return {'signal': 'HOLD', 'score': 0, 'reason': 'Strategia disabilitata'}
 
         # Calcola indicatori
         df = self.calculate_indicators(df)
-        if df is None or df.empty:
+        if df is None or df.empty or len(df) < 2:
             return {'signal': 'HOLD', 'score': 0, 'reason': 'Dati insufficienti'}
 
-        # Prendi l'ultima riga
+        # Prendi ultime 2 righe per crossover detection
         last = df.iloc[-1]
-        prev = df.iloc[-2] if len(df) > 1 else last
+        prev = df.iloc[-2]
 
-        # Calcola punteggio BUY e SELL
+        close = float(last.get('close', 0))
+        ema_fast = float(last.get(f'ema_{self.ema_fast}', 0))
+        ema_mid = float(last.get(f'ema_{self.ema_mid}', 0))
+        ema_trend = float(last.get(f'ema_{self.ema_trend}', 0))
+        rsi = float(last.get('rsi', 50))
+        atr = float(last.get('atr', 0))
+        volume_ratio = float(last.get('volume_ratio', 1))
+
+        prev_ema_fast = float(prev.get(f'ema_{self.ema_fast}', 0))
+        prev_ema_mid = float(prev.get(f'ema_{self.ema_mid}', 0))
+
+        details = {}
+        signal = 'HOLD'
+        score = 0
         buy_score = 0
         sell_score = 0
-        details = {}
 
-        # ---- INDICATORE 1: RSI ----
-        rsi = last.get('rsi', 50)
-        if pd.notna(rsi):
+        # ---- 1. Check: Mercato non piatto (ATR > 0.05%) ----
+        atr_pct = (atr / close * 100) if close > 0 else 0
+        if atr_pct < (self.min_volatility_pct * 100):
+            details['atr'] = f"SKIP (mercato piatto: {atr_pct:.3f}% < {self.min_volatility_pct*100:.3f}%)"
+            return {
+                'signal': 'HOLD',
+                'score': 0,
+                'reason': 'Mercato piatto - ATR insufficiente',
+                'details': details
+            }
+
+        details['atr'] = f"OK ({atr_pct:.3f}%)"
+
+        # ---- 2. Check: Volume (>120% media) ----
+        if volume_ratio < self.vol_multiplier:
+            details['volume'] = f"LOW ({volume_ratio:.2f}x media)"
+            # Se volume basso, riduci score
+            vol_ok = False
+        else:
+            details['volume'] = f"OK ({volume_ratio:.2f}x media)"
+            vol_ok = True
+
+        # ---- 3. Crossover Detection ----
+        bullish_cross = (prev_ema_fast <= prev_ema_mid) and (ema_fast > ema_mid)
+        bearish_cross = (prev_ema_fast >= prev_ema_mid) and (ema_fast < ema_mid)
+
+        # ---- BUY Signal ----
+        if bullish_cross:
+            details['crossover'] = f"BUY (EMA{self.ema_fast} > EMA{self.ema_mid})"
+
             if rsi < self.rsi_oversold:
-                buy_score += 1
+                buy_score += 2
                 details['rsi'] = f"BUY ({rsi:.1f} < {self.rsi_oversold})"
-            elif rsi > self.rsi_overbought:
-                sell_score += 1
-                details['rsi'] = f"SELL ({rsi:.1f} > {self.rsi_overbought})"
-            else:
-                details['rsi'] = f"NEUTRAL ({rsi:.1f})"
-        else:
-            details['rsi'] = "N/A"
-
-        # ---- INDICATORE 2: MACD ----
-        macd = last.get('macd', 0)
-        macd_sig = last.get('macd_signal', 0)
-        prev_macd = prev.get('macd', 0)
-        prev_macd_sig = prev.get('macd_signal', 0)
-
-        if pd.notna(macd) and pd.notna(macd_sig):
-            # Crossover bullish: MACD passa da sotto a sopra la linea signal
-            bullish_cross = (prev_macd <= prev_macd_sig) and (macd > macd_sig)
-            bearish_cross = (prev_macd >= prev_macd_sig) and (macd < macd_sig)
-
-            if bullish_cross:
+            elif rsi < 50:
                 buy_score += 1
-                details['macd'] = f"BUY (crossover rialzista)"
-            elif bearish_cross:
-                sell_score += 1
-                details['macd'] = f"SELL (crossover ribassista)"
-            elif macd > macd_sig:
+                details['rsi'] = f"NEUTRAL-BUY ({rsi:.1f})"
+            else:
                 buy_score += 0.5
-                details['macd'] = f"BULLISH ({macd:.4f} > {macd_sig:.4f})"
-            else:
-                details['macd'] = f"NEUTRAL ({macd:.4f})"
-        else:
-            details['macd'] = "N/A"
+                details['rsi'] = f"NEUTRAL ({rsi:.1f})"
 
-        # ---- INDICATORE 3: BOLLINGER BANDS ----
-        close = last.get('close', 0)
-        bb_lower = last.get('bb_lower', 0)
-        bb_upper = last.get('bb_upper', 0)
-        bb_middle = last.get('bb_middle', 0)
-
-        if pd.notna(bb_lower) and pd.notna(bb_upper) and close > 0:
-            if close < bb_lower:
+            if vol_ok:
                 buy_score += 1
-                details['bollinger'] = f"BUY (sotto banda inf: {close:.2f} < {bb_lower:.2f})"
-            elif close > bb_upper:
+
+            # Filtro trend: se EMA5 > EMA50, il trend è rialzista
+            if ema_fast > ema_trend:
+                buy_score += 0.5
+                details['trend'] = "BULLISH"
+            else:
+                details['trend'] = "BEARISH (warning)"
+
+            if buy_score >= self.min_score:
+                signal = 'BUY'
+                score = int(buy_score)
+
+        # ---- SELL Signal ----
+        elif bearish_cross:
+            details['crossover'] = f"SELL (EMA{self.ema_fast} < EMA{self.ema_mid})"
+
+            if rsi > self.rsi_overbought:
+                sell_score += 2
+                details['rsi'] = f"SELL ({rsi:.1f} > {self.rsi_overbought})"
+            elif rsi > 50:
                 sell_score += 1
-                details['bollinger'] = f"SELL (sopra banda sup: {close:.2f} > {bb_upper:.2f})"
+                details['rsi'] = f"NEUTRAL-SELL ({rsi:.1f})"
             else:
-                bb_pct = (close - bb_lower) / (bb_upper - bb_lower) if (bb_upper - bb_lower) > 0 else 0.5
-                details['bollinger'] = f"NEUTRAL (posizione: {bb_pct:.1%})"
-        else:
-            details['bollinger'] = "N/A"
+                sell_score += 0.5
+                details['rsi'] = f"NEUTRAL ({rsi:.1f})"
 
-        # ---- INDICATORE 4: EMA CROSSOVER ----
-        ema_fast_val = last.get(f'ema_{self.ema_fast}', 0)
-        ema_slow_val = last.get(f'ema_{self.ema_slow}', 0)
-        prev_ema_fast = prev.get(f'ema_{self.ema_fast}', 0)
-        prev_ema_slow = prev.get(f'ema_{self.ema_slow}', 0)
-
-        if pd.notna(ema_fast_val) and pd.notna(ema_slow_val) and ema_fast_val > 0:
-            if ema_fast_val > ema_slow_val:
-                buy_score += 1
-                details['ema'] = f"BUY (EMA{self.ema_fast} > EMA{self.ema_slow})"
-            else:
+            if vol_ok:
                 sell_score += 1
-                details['ema'] = f"SELL (EMA{self.ema_fast} < EMA{self.ema_slow})"
-        else:
-            details['ema'] = "N/A"
 
-        # ---- INDICATORE 5: VOLUME ----
-        volume_ratio = last.get('volume_ratio', 1)
-        if pd.notna(volume_ratio):
-            if volume_ratio > self.vol_multiplier:
-                # Volume alto: amplifica il segnale dominante
-                if buy_score > sell_score:
-                    buy_score += 1
-                    details['volume'] = f"BUY CONFIRM ({volume_ratio:.1f}x media)"
-                elif sell_score > buy_score:
-                    sell_score += 1
-                    details['volume'] = f"SELL CONFIRM ({volume_ratio:.1f}x media)"
-                else:
-                    details['volume'] = f"HIGH ({volume_ratio:.1f}x media)"
+            # Filtro trend: se EMA5 < EMA50, il trend è ribassista
+            if ema_fast < ema_trend:
+                sell_score += 0.5
+                details['trend'] = "BEARISH"
             else:
-                details['volume'] = f"LOW ({volume_ratio:.1f}x media)"
-        else:
-            details['volume'] = "N/A"
+                details['trend'] = "BULLISH (warning)"
 
-        # ---- DECISIONE FINALE ----
-        buy_score = round(buy_score)
-        sell_score = round(sell_score)
+            if sell_score >= self.min_score:
+                signal = 'SELL'
+                score = int(sell_score)
 
-        if buy_score >= self.min_score and buy_score > sell_score:
-            signal = 'BUY'
-            score = buy_score
-        elif sell_score >= self.min_score and sell_score > buy_score:
-            signal = 'SELL'
-            score = sell_score
         else:
-            signal = 'HOLD'
-            score = max(buy_score, sell_score)
+            # Nessun crossover
+            details['crossover'] = "NO_CROSS"
+            if ema_fast > ema_mid:
+                details['trend_direction'] = f"EMA{self.ema_fast} > EMA{self.ema_mid} (bullish trend, waiting for pullback)"
+            else:
+                details['trend_direction'] = f"EMA{self.ema_fast} < EMA{self.ema_mid} (bearish trend, waiting for bounce)"
 
         result = {
             'signal': signal,
             'score': score,
             'buy_score': buy_score,
             'sell_score': sell_score,
-            'max_score': 5,
-            'min_required': self.min_score,
             'symbol': symbol,
             'strategy': 'confluence',
             'timestamp': datetime.now().isoformat(),
             'details': details,
             'indicators': {
-                'rsi': float(rsi) if pd.notna(rsi) else None,
-                'macd': float(macd) if pd.notna(macd) else None,
-                'bb_pct': float((close - bb_lower) / (bb_upper - bb_lower)) if (bb_upper and bb_lower and bb_upper != bb_lower) else None,
-                'ema_trend': 'up' if (ema_fast_val and ema_slow_val and ema_fast_val > ema_slow_val) else 'down',
-                'volume_ratio': float(volume_ratio) if pd.notna(volume_ratio) else None,
-                'atr': float(last.get('atr', 0)) if pd.notna(last.get('atr', 0)) else None,
-                'adx': float(last.get('adx', 0)) if pd.notna(last.get('adx', 0)) else None,
-                'close': float(close),
+                'ema_fast': ema_fast,
+                'ema_mid': ema_mid,
+                'ema_trend': ema_trend,
+                'rsi': rsi,
+                'atr_pct': atr_pct,
+                'volume_ratio': volume_ratio,
+                'close': close,
+                'bullish_cross': bullish_cross,
+                'bearish_cross': bearish_cross,
             }
         }
 
-        logger.info(f"[{symbol}] Confluence: {signal} ({score}/5) - {', '.join([f'{k}:{v[:10]}' for k,v in details.items()])}")
+        logger.info(f"[{symbol}] EMA Crossover: {signal} ({score}) - {details.get('crossover', 'NO_CROSS')} | RSI={rsi:.1f} | Vol={volume_ratio:.2f}x")
         return result

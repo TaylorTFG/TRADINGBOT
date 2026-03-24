@@ -1,10 +1,12 @@
 # ============================================================
-# STRATEGIA 3: NEWS SENTIMENT + ANALISI TECNICA
-# Combina sentiment delle notizie con conferma tecnica
+# STRATEGIA 3: VWAP MOMENTUM SCALPING (1min)
+# Incrocia il prezzo con VWAP per identificare momentum
+# Conferma con MACD veloce (5,13,5)
 # ============================================================
 
 import logging
 import pandas as pd
+import numpy as np
 from typing import Optional, Dict
 from datetime import datetime
 
@@ -13,128 +15,133 @@ logger = logging.getLogger(__name__)
 
 class SentimentStrategy:
     """
-    Strategia basata sul sentiment delle notizie.
+    VWAP Momentum Scalping Strategy.
 
-    Logica:
-    1. Recupera sentiment score da NewsAPI e RSS feed (-1 a +1)
-    2. Se sentiment > +0.6 e tecnica concorda → segnale BUY forte
-    3. Se sentiment < -0.6 → blocca acquisti, valuta short
-    4. Peso recente: ultime 2 ore = 60%, ultime 24 ore = 40%
+    Su candele 1min:
+    - VWAP calcolato su tutta la giornata (reset ogni inizio giornata)
+    - MACD(5,13,5) per momentum bullish/bearish
+    - Zone proximity: operare solo se price entro 0.3% VWAP
 
-    Trigger speciali:
-    - Earnings annunci
-    - Fed meetings
-    - Dati macro (CPI, NFP)
+    Segnali:
+    - BUY: Prezzo sale da sotto VWAP a sopra VWAP + MACD bullish
+    - SELL: Prezzo scende da sopra VWAP a sotto VWAP + MACD bearish
     """
 
     def __init__(self, news_analyzer, config: dict):
-        """
-        Inizializza la strategia sentiment.
-
-        Args:
-            news_analyzer: Istanza del NewsAnalyzer
-            config: Configurazione dal config.yaml
-        """
-        self.news_analyzer = news_analyzer
+        """Inizializza la strategia VWAP Momentum."""
+        self.news_analyzer = news_analyzer  # Mantenuto per compatibilità API
         self.config = config
         self.strategy_config = config.get('strategy_sentiment', {})
         self.enabled = self.strategy_config.get('enabled', True)
 
-        # Soglie sentiment
-        self.bullish_threshold = self.strategy_config.get('bullish_threshold', 0.6)
-        self.bearish_threshold = self.strategy_config.get('bearish_threshold', -0.6)
+        # Parametri VWAP
+        vwap_cfg = self.strategy_config.get('vwap', {})
+        self.reset_daily = vwap_cfg.get('reset_daily', True)
+        self.price_proximity_pct = vwap_cfg.get('price_proximity_pct', 0.003)  # 0.3%
 
-        logger.info(
-            f"SentimentStrategy inizializzata "
-            f"(bull: >{self.bullish_threshold}, bear: <{self.bearish_threshold})"
-        )
+        # Parametri MACD (veloce per scalping)
+        macd_cfg = self.strategy_config.get('macd', {})
+        self.macd_fast = macd_cfg.get('fast_period', 5)
+        self.macd_slow = macd_cfg.get('slow_period', 13)
+        self.macd_signal = macd_cfg.get('signal_period', 5)
 
-    def check_technical_confirmation(self, df: pd.DataFrame) -> Dict:
+        # Soglie momentum
+        self.bullish_threshold = self.strategy_config.get('bullish_threshold', 0.1)
+        self.bearish_threshold = self.strategy_config.get('bearish_threshold', -0.1)
+
+        logger.info(f"SentimentStrategy (VWAP Momentum) inizializzata")
+
+    def calculate_vwap(self, df: pd.DataFrame) -> Optional[pd.Series]:
         """
-        Verifica la conferma tecnica semplificata per il sentiment.
+        Calcola VWAP (Volume Weighted Average Price).
 
-        Usa:
-        - Trend EMA (20 vs 50)
-        - RSI (non in zona opposta)
-        - Momentum (prezzo sopra/sotto la media)
+        VWAP = cumsum(close * volume) / cumsum(volume)
 
         Args:
-            df: DataFrame con dati OHLCV e indicatori
+            df: DataFrame con OHLCV
 
         Returns:
-            Dizionario con confirmed, direction, details
+            Serie pandas con valori VWAP
         """
-        if df is None or df.empty:
-            return {'confirmed': False, 'direction': 'NEUTRAL', 'details': {}}
+        if df is None or len(df) < 2:
+            return None
 
-        last = df.iloc[-1]
+        try:
+            df = df.copy()
+            typical_price = (df['high'] + df['low'] + df['close']) / 3
+            vwap = (typical_price * df['volume']).cumsum() / df['volume'].cumsum()
+            return vwap
+        except Exception as e:
+            logger.error(f"Errore calcolo VWAP: {e}")
+            return None
 
-        # EMA trend
-        ema_fast = last.get('ema_20', last.get('close', 0))
-        ema_slow = last.get('ema_50', last.get('close', 0))
-        close = last.get('close', 0)
-        rsi = last.get('rsi', 50)
+    def calculate_macd(self, df: pd.DataFrame) -> Dict:
+        """
+        Calcola MACD veloce (5,13,5) per momentum.
 
-        details = {}
-        bullish_signals = 0
-        bearish_signals = 0
+        Args:
+            df: DataFrame con OHLCV
 
-        # Verifica EMA
-        if ema_fast and ema_slow and ema_fast > 0 and ema_slow > 0:
-            if ema_fast > ema_slow:
-                bullish_signals += 1
-                details['ema'] = 'bullish'
+        Returns:
+            Dizionario con macd, signal, histogram, direction
+        """
+        if df is None or len(df) < max(self.macd_slow, self.macd_signal) + 5:
+            return {'macd': None, 'signal': None, 'hist': None, 'direction': 'NEUTRAL'}
+
+        try:
+            close = df['close']
+
+            # MACD manuale
+            ema_fast = close.ewm(span=self.macd_fast, adjust=False).mean()
+            ema_slow = close.ewm(span=self.macd_slow, adjust=False).mean()
+            macd = ema_fast - ema_slow
+            signal = macd.ewm(span=self.macd_signal, adjust=False).mean()
+            histogram = macd - signal
+
+            # Valori attuali
+            macd_val = float(macd.iloc[-1]) if pd.notna(macd.iloc[-1]) else 0
+            signal_val = float(signal.iloc[-1]) if pd.notna(signal.iloc[-1]) else 0
+            hist_val = float(histogram.iloc[-1]) if pd.notna(histogram.iloc[-1]) else 0
+
+            # Crossover detection
+            macd_prev = float(macd.iloc[-2]) if len(macd) > 1 and pd.notna(macd.iloc[-2]) else 0
+            signal_prev = float(signal.iloc[-2]) if len(signal) > 1 and pd.notna(signal.iloc[-2]) else 0
+
+            bullish_cross = (macd_prev <= signal_prev) and (macd_val > signal_val)
+            bearish_cross = (macd_prev >= signal_prev) and (macd_val < signal_val)
+
+            # Direction
+            if bullish_cross:
+                direction = 'BULLISH_CROSS'
+            elif bearish_cross:
+                direction = 'BEARISH_CROSS'
+            elif macd_val > signal_val:
+                direction = 'BULLISH'
+            elif macd_val < signal_val:
+                direction = 'BEARISH'
             else:
-                bearish_signals += 1
-                details['ema'] = 'bearish'
+                direction = 'NEUTRAL'
 
-        # Verifica RSI (non ipercomprato per buy, non ipervenduto per sell)
-        if pd.notna(rsi):
-            if rsi < 70:  # Non overbought per buy
-                bullish_signals += 1
-                details['rsi'] = f'ok_for_buy ({rsi:.1f})'
-            if rsi > 30:  # Non oversold per sell
-                bearish_signals += 1
-                details['rsi'] = f'ok_for_sell ({rsi:.1f})'
+            return {
+                'macd': macd_val,
+                'signal': signal_val,
+                'hist': hist_val,
+                'direction': direction,
+                'bullish_cross': bullish_cross,
+                'bearish_cross': bearish_cross,
+            }
 
-        # Momentum (prezzo vs EMA200)
-        ema200 = last.get('ema200', 0)
-        if ema200 and close and close > 0:
-            if close > ema200:
-                bullish_signals += 1
-                details['momentum'] = 'above_ema200'
-            else:
-                bearish_signals += 1
-                details['momentum'] = 'below_ema200'
-
-        if bullish_signals > bearish_signals:
-            direction = 'BULLISH'
-            confirmed = bullish_signals >= 2
-        elif bearish_signals > bullish_signals:
-            direction = 'BEARISH'
-            confirmed = bearish_signals >= 2
-        else:
-            direction = 'NEUTRAL'
-            confirmed = False
-
-        return {
-            'confirmed': confirmed,
-            'direction': direction,
-            'bullish_signals': bullish_signals,
-            'bearish_signals': bearish_signals,
-            'details': details
-        }
+        except Exception as e:
+            logger.error(f"Errore calcolo MACD: {e}")
+            return {'macd': None, 'signal': None, 'hist': None, 'direction': 'NEUTRAL'}
 
     def analyze(self, df: pd.DataFrame, symbol: str) -> Dict:
         """
-        Analizza sentiment e tecnica per generare un segnale.
+        Analizza VWAP crossover con confirma MACD.
 
-        Args:
-            df: DataFrame con dati OHLCV e indicatori tecnici
-            symbol: Simbolo dell'asset
-
-        Returns:
-            Dizionario con signal, sentiment_score, technical_confirmation, details
+        Logica SCALPING:
+        - BUY: Prezzo sopra VWAP + MACD bullish + prezzo entro 0.3% VWAP
+        - SELL: Prezzo sotto VWAP + MACD bearish + prezzo entro 0.3% VWAP
         """
         if not self.enabled:
             return {
@@ -144,65 +151,100 @@ class SentimentStrategy:
                 'reason': 'Strategia disabilitata'
             }
 
-        # Recupera sentiment dalle notizie
-        sentiment_data = self.news_analyzer.get_sentiment(symbol)
-        sentiment_score = sentiment_data.get('score', 0.0)
-        article_count = sentiment_data.get('article_count', 0)
-        classification = sentiment_data.get('classification', 'NEUTRAL')
-
-        # Se non ci sono notizie rilevanti, segnale neutro
-        if article_count == 0:
+        if df is None or len(df) < 2:
             return {
                 'signal': 'HOLD',
                 'strategy': 'sentiment',
                 'symbol': symbol,
                 'sentiment_score': 0,
-                'article_count': 0,
-                'reason': 'Nessuna notizia trovata',
+                'reason': 'Dati insufficienti'
+            }
+
+        # ---- Calcola VWAP ----
+        vwap_series = self.calculate_vwap(df)
+        if vwap_series is None or vwap_series.empty:
+            return {
+                'signal': 'HOLD',
+                'strategy': 'sentiment',
+                'symbol': symbol,
+                'sentiment_score': 0,
+                'reason': 'Impossibile calcolare VWAP'
+            }
+
+        last = df.iloc[-1]
+        prev = df.iloc[-2]
+
+        close = float(last.get('close', 0))
+        prev_close = float(prev.get('close', 0))
+        vwap = float(vwap_series.iloc[-1])
+        prev_vwap = float(vwap_series.iloc[-2])
+
+        # ---- Calcola MACD ----
+        macd_result = self.calculate_macd(df)
+
+        # ---- Proximity Filter ----
+        # Operare solo se prezzo è entro 0.3% dal VWAP
+        proximity = abs(close - vwap) / vwap if vwap > 0 else 1.0
+        proximity_ok = proximity <= self.price_proximity_pct
+
+        details = {
+            'vwap': f"{vwap:.2f}",
+            'proximity': f"{proximity*100:.3f}%",
+            'proximity_ok': proximity_ok,
+            'macd': macd_result['direction'],
+        }
+
+        # ---- SEGNALE ----
+        signal = 'HOLD'
+        sentiment_score = 0
+        reason = ''
+
+        if not proximity_ok:
+            # Prezzo troppo lontano da VWAP
+            reason = f"Price too far from VWAP ({proximity*100:.3f}% > {self.price_proximity_pct*100:.3f}%)"
+            details['reason'] = reason
+            return {
+                'signal': 'HOLD',
+                'strategy': 'sentiment',
+                'symbol': symbol,
+                'sentiment_score': 0,
+                'reason': reason,
+                'details': details,
                 'timestamp': datetime.now().isoformat()
             }
 
-        # Verifica conferma tecnica
-        technical = self.check_technical_confirmation(df)
-
-        # ---- LOGICA DEL SEGNALE ----
-        signal = 'HOLD'
-        reason = ''
-        confidence = 0.0
-
-        # Segnale BUY forte: sentiment molto positivo + tecnica concorde
-        if sentiment_score > self.bullish_threshold:
-            if technical['direction'] == 'BULLISH' and technical['confirmed']:
+        # ---- BUY: Prezzo sopra VWAP + MACD bullish ----
+        if close > vwap:  # Prezzo è sopra VWAP
+            if macd_result['direction'] in ['BULLISH', 'BULLISH_CROSS']:
                 signal = 'BUY'
-                confidence = min(0.95, (sentiment_score + 0.5) * 0.7)
-                reason = f"Sentiment fortemente positivo ({sentiment_score:.2f}) + conferma tecnica"
-            elif technical['direction'] != 'BEARISH':
-                signal = 'BUY'
-                confidence = min(0.75, sentiment_score * 0.7)
-                reason = f"Sentiment positivo ({sentiment_score:.2f}), tecnica neutrale"
+                sentiment_score = 0.5 if macd_result['direction'] == 'BULLISH_CROSS' else 0.3
+                reason = "VWAP bullish crossover + MACD momentum"
 
-        # Segnale SELL / blocco acquisti: sentiment molto negativo
-        elif sentiment_score < self.bearish_threshold:
-            if technical['direction'] == 'BEARISH' or technical['direction'] == 'NEUTRAL':
+                # Bonus se è un crossover
+                if macd_result['bullish_cross']:
+                    sentiment_score = 0.8
+                    details['strength'] = 'STRONG (crossover detected)'
+
+        # ---- SELL: Prezzo sotto VWAP + MACD bearish ----
+        elif close < vwap:  # Prezzo è sotto VWAP
+            if macd_result['direction'] in ['BEARISH', 'BEARISH_CROSS']:
                 signal = 'SELL'
-                confidence = min(0.90, abs(sentiment_score) * 0.7)
-                reason = f"Sentiment molto negativo ({sentiment_score:.2f})"
-            else:
-                signal = 'HOLD'  # Tecnica positiva contraddice il sentiment bearish
-                reason = f"Sentiment negativo ma tecnica bullish - HOLD"
+                sentiment_score = -0.5 if macd_result['direction'] == 'BEARISH_CROSS' else -0.3
+                reason = "VWAP bearish crossover + MACD momentum"
 
-        # Sentiment moderato - segui la tecnica
-        elif sentiment_score > 0.15 and technical['direction'] == 'BULLISH':
-            signal = 'HOLD'  # Non abbastanza forte per un segnale
-            reason = f"Sentiment moderato ({sentiment_score:.2f}), attendo segnale più forte"
+                # Bonus se è un crossover
+                if macd_result['bearish_cross']:
+                    sentiment_score = -0.8
+                    details['strength'] = 'STRONG (crossover detected)'
+
         else:
-            reason = f"Sentiment neutro ({sentiment_score:.2f})"
+            # Prezzo approssimativamente al VWAP
+            reason = "Price at VWAP level - awaiting crossover"
 
         logger.info(
-            f"[{symbol}] Sentiment: {signal} | "
-            f"Score: {sentiment_score:.3f} ({classification}) | "
-            f"Articoli: {article_count} | "
-            f"Tecnica: {technical['direction']}"
+            f"[{symbol}] VWAP Momentum: {signal} | "
+            f"Price={close:.2f}, VWAP={vwap:.2f} | "
+            f"MACD={macd_result['direction']} | Proximity={proximity*100:.3f}%"
         )
 
         return {
@@ -211,14 +253,17 @@ class SentimentStrategy:
             'symbol': symbol,
             'timestamp': datetime.now().isoformat(),
             'sentiment_score': sentiment_score,
-            'sentiment_classification': classification,
-            'article_count': article_count,
-            'recent_count': sentiment_data.get('recent_count', 0),
-            'confidence': confidence,
-            'technical_confirmation': technical,
+            'sentiment_classification': 'VWAP_MOMENTUM',
+            'article_count': 0,  # N/A per VWAP
+            'confidence': min(0.9, abs(sentiment_score) + 0.1),
             'reason': reason,
-            'details': {
-                'recent_sentiment': sentiment_data.get('recent_score', 0),
-                'older_sentiment': sentiment_data.get('older_score', 0),
+            'details': details,
+            'indicators': {
+                'vwap': vwap,
+                'close': close,
+                'distance_from_vwap': proximity,
+                'macd': macd_result['macd'],
+                'macd_signal': macd_result['signal'],
+                'macd_histogram': macd_result['hist'],
             }
         }

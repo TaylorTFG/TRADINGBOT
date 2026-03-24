@@ -1,327 +1,256 @@
 # ============================================================
-# STRATEGIA 2: BREAKOUT + MOMENTUM
-# Entra quando il prezzo rompe livelli chiave con volume forte
-# Usa ADX per filtrare i falsi segnali in mercati laterali
+# STRATEGIA 2: BOLLINGER BAND SQUEEZE SCALPING (1min)
+# Entra quando le Bollinger Bands si comprimono (squeeze)
+# poi esce quando il prezzo rompe la banda con volume
 # ============================================================
 
 import logging
 import pandas as pd
 import numpy as np
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict
 from datetime import datetime
+
+try:
+    import ta
+    TA_AVAILABLE = True
+except ImportError:
+    TA_AVAILABLE = False
+    logging.warning("Libreria 'ta' non disponibile. Calcoli manuali attivati.")
 
 logger = logging.getLogger(__name__)
 
 
 class BreakoutStrategy:
     """
-    Strategia di breakout con filtro momentum.
+    Bollinger Band Squeeze Scalping Strategy.
 
-    Logica:
-    1. Calcola supporti e resistenze sugli ultimi 20 giorni
-    2. Identifica breakout quando il prezzo supera la resistenza
-    3. Conferma con volume > 200% della media
-    4. Filtra con ADX > 25 (trend forte, no laterale)
-    5. Usa ATR per target e stop dinamici
-    6. Anti falso breakout: aspetta chiusura candela sopra il livello
+    Su candele 1min:
+    - Bollinger Bands periodo 20, std 2.0
+    - Squeeze detection: bandwidth < 0.5%
+    - Breakout: prezzo rompe BB_upper o BB_lower + volume spike
+    - Mean reversion: prezzo tocca BB + RSI extreme
+
+    Target: BB_middle (dynamic)
     """
 
     def __init__(self, config: dict):
-        """
-        Inizializza la strategia di breakout.
-
-        Args:
-            config: Configurazione dal config.yaml
-        """
+        """Inizializza la strategia Bollinger Squeeze."""
         self.config = config
         self.strategy_config = config.get('strategy_breakout', {})
         self.enabled = self.strategy_config.get('enabled', True)
 
-        self.lookback_days = self.strategy_config.get('lookback_days', 20)
-        self.volume_multiplier = self.strategy_config.get('volume_multiplier', 2.0)
-        self.adx_min = self.strategy_config.get('adx_min', 25)
-        self.atr_period = self.strategy_config.get('atr_period', 14)
-        self.wait_candle_close = self.strategy_config.get('wait_candle_close', True)
+        # Parametri Bollinger Bands
+        bb_cfg = self.strategy_config.get('bollinger', {})
+        self.bb_period = bb_cfg.get('period', 20)
+        self.bb_std = bb_cfg.get('std_dev', 2.0)
 
-        logger.info(f"BreakoutStrategy inizializzata (ADX min: {self.adx_min}, Vol: {self.volume_multiplier}x)")
+        # Squeeze threshold
+        squeeze_cfg = self.strategy_config.get('squeeze', {})
+        self.squeeze_threshold = squeeze_cfg.get('bandwidth_threshold', 0.005)  # 0.5%
 
-    def find_support_resistance(self, df_daily: pd.DataFrame) -> Dict:
+        # Breakout confirmation
+        breakout_cfg = self.strategy_config.get('breakout', {})
+        self.breakout_volume_mult = breakout_cfg.get('volume_multiplier', 1.5)
+
+        # Mean reversion RSI
+        mean_rev = self.strategy_config.get('mean_reversion', {})
+        self.rsi_oversold = mean_rev.get('rsi_oversold', 30)
+        self.rsi_overbought = mean_rev.get('rsi_overbought', 70)
+
+        logger.info(f"BreakoutStrategy (Bollinger Squeeze) inizializzata")
+
+    def calculate_bollinger_squeeze(self, df: pd.DataFrame) -> Optional[pd.DataFrame]:
         """
-        Calcola livelli chiave di supporto e resistenza.
-
-        Usa due metodi:
-        1. Massimi e minimi locali (pivot points)
-        2. Livelli di prezzo ad alto volume (Volume Profile semplificato)
-
-        Args:
-            df_daily: DataFrame con dati giornalieri
-
-        Returns:
-            Dizionario con levels, support, resistance
-        """
-        if df_daily is None or len(df_daily) < 5:
-            return {'support': [], 'resistance': [], 'levels': []}
-
-        df = df_daily.tail(self.lookback_days).copy()
-
-        # Metodo 1: Pivot Points (massimi e minimi locali)
-        pivot_levels = []
-        for i in range(2, len(df) - 2):
-            # Massimo locale (resistenza)
-            if (df['high'].iloc[i] > df['high'].iloc[i-1] and
-                    df['high'].iloc[i] > df['high'].iloc[i-2] and
-                    df['high'].iloc[i] > df['high'].iloc[i+1] and
-                    df['high'].iloc[i] > df['high'].iloc[i+2]):
-                pivot_levels.append({
-                    'price': float(df['high'].iloc[i]),
-                    'type': 'resistance',
-                    'strength': 1
-                })
-
-            # Minimo locale (supporto)
-            if (df['low'].iloc[i] < df['low'].iloc[i-1] and
-                    df['low'].iloc[i] < df['low'].iloc[i-2] and
-                    df['low'].iloc[i] < df['low'].iloc[i+1] and
-                    df['low'].iloc[i] < df['low'].iloc[i+2]):
-                pivot_levels.append({
-                    'price': float(df['low'].iloc[i]),
-                    'type': 'support',
-                    'strength': 1
-                })
-
-        # Aggiungi high e low del periodo come livelli chiave
-        period_high = float(df['high'].max())
-        period_low = float(df['low'].min())
-        current_price = float(df['close'].iloc[-1])
-
-        pivot_levels.append({'price': period_high, 'type': 'resistance', 'strength': 2})
-        pivot_levels.append({'price': period_low, 'type': 'support', 'strength': 2})
-
-        # Separa support e resistance in base al prezzo attuale
-        support_levels = sorted(
-            [l['price'] for l in pivot_levels if l['price'] < current_price],
-            reverse=True
-        )[:5]  # Prendi i 5 più vicini sopra
-
-        resistance_levels = sorted(
-            [l['price'] for l in pivot_levels if l['price'] > current_price]
-        )[:5]  # Prendi i 5 più vicini sotto
-
-        return {
-            'support': support_levels,
-            'resistance': resistance_levels,
-            'period_high': period_high,
-            'period_low': period_low,
-            'current_price': current_price,
-            'all_levels': pivot_levels
-        }
-
-    def calculate_adx(self, df: pd.DataFrame, period: int = 14) -> pd.Series:
-        """
-        Calcola ADX (Average Directional Index) manualmente.
+        Calcola Bollinger Bands e metriche squeeze.
 
         Args:
             df: DataFrame con OHLCV
-            period: Periodo per il calcolo ADX
 
         Returns:
-            Serie pandas con valori ADX
+            DataFrame con BB e bandwidth
         """
-        high = df['high']
-        low = df['low']
+        if df is None or len(df) < self.bb_period + 5:
+            return None
+
+        df = df.copy()
         close = df['close']
 
-        # True Range
-        tr1 = high - low
-        tr2 = (high - close.shift(1)).abs()
-        tr3 = (low - close.shift(1)).abs()
-        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-        atr = tr.rolling(window=period).mean()
-
-        # Directional Movement
-        up_move = high - high.shift(1)
-        down_move = low.shift(1) - low
-
-        # +DM e -DM
-        plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
-        minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
-
-        plus_dm_series = pd.Series(plus_dm, index=df.index)
-        minus_dm_series = pd.Series(minus_dm, index=df.index)
-
-        # Smoothed +DM, -DM
-        plus_di = 100 * plus_dm_series.rolling(window=period).mean() / atr.replace(0, np.finfo(float).eps)
-        minus_di = 100 * minus_dm_series.rolling(window=period).mean() / atr.replace(0, np.finfo(float).eps)
-
-        # DX e ADX
-        dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.finfo(float).eps)
-        adx = dx.rolling(window=period).mean()
-
-        return adx
-
-    def detect_breakout(
-        self,
-        df_5min: pd.DataFrame,
-        df_daily: pd.DataFrame,
-        symbol: str
-    ) -> Dict:
-        """
-        Rileva un breakout dal livello di resistenza o supporto.
-
-        Args:
-            df_5min: Dati su timeframe 5 minuti (per il segnale)
-            df_daily: Dati giornalieri (per supporti/resistenze)
-            symbol: Simbolo dell'asset
-
-        Returns:
-            Dizionario con signal, type (breakout/breakdown), details
-        """
-        if not self.enabled:
-            return {'signal': 'HOLD', 'reason': 'Strategia disabilitata'}
-
-        if df_5min is None or df_daily is None:
-            return {'signal': 'HOLD', 'reason': 'Dati insufficienti'}
-
-        if len(df_5min) < 30 or len(df_daily) < self.lookback_days:
-            return {'signal': 'HOLD', 'reason': 'Dati storici insufficienti'}
-
-        # Recupera i livelli chiave
-        levels = self.find_support_resistance(df_daily)
-        if not levels:
-            return {'signal': 'HOLD', 'reason': 'Nessun livello trovato'}
-
-        # Calcola ADX per verificare trend forte
         try:
-            adx_series = self.calculate_adx(df_5min, self.atr_period)
-            adx_current = float(adx_series.iloc[-1]) if not adx_series.empty else 0
+            if TA_AVAILABLE:
+                bb = ta.volatility.BollingerBands(
+                    close,
+                    window=self.bb_period,
+                    window_dev=self.bb_std
+                )
+                df['bb_upper'] = bb.bollinger_hband()
+                df['bb_lower'] = bb.bollinger_lband()
+                df['bb_middle'] = bb.bollinger_mavg()
+            else:
+                # Bollinger Bands manuale
+                df['bb_middle'] = close.rolling(window=self.bb_period).mean()
+                std = close.rolling(window=self.bb_period).std()
+                df['bb_upper'] = df['bb_middle'] + (std * self.bb_std)
+                df['bb_lower'] = df['bb_middle'] - (std * self.bb_std)
+
+            # Calcola bandwidth (larghezza della banda)
+            df['bb_width'] = df['bb_upper'] - df['bb_lower']
+            df['bb_middle_safe'] = df['bb_middle'].replace(0, 1)
+            df['bandwidth_pct'] = df['bb_width'] / df['bb_middle_safe']
+
+            # RSI per mean reversion
+            delta = close.diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=7).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=7).mean()
+            rs = gain / loss.replace(0, np.finfo(float).eps)
+            df['rsi'] = 100 - (100 / (1 + rs))
+
+            # Volume ratio
+            df['volume_ma'] = df['volume'].rolling(window=10).mean()
+            df['volume_ratio'] = df['volume'] / df['volume_ma'].replace(0, 1)
+
+            return df
+
         except Exception as e:
-            logger.warning(f"Errore calcolo ADX: {e}")
-            adx_current = 0
-
-        # Calcola ATR
-        try:
-            tr = pd.concat([
-                df_5min['high'] - df_5min['low'],
-                (df_5min['high'] - df_5min['close'].shift(1)).abs(),
-                (df_5min['low'] - df_5min['close'].shift(1)).abs()
-            ], axis=1).max(axis=1)
-            atr = float(tr.rolling(14).mean().iloc[-1])
-        except Exception:
-            atr = float(df_5min['close'].iloc[-1]) * 0.01  # 1% come fallback
-
-        # Volume ratio
-        volume_ma = df_5min['volume'].rolling(20).mean()
-        current_volume = float(df_5min['volume'].iloc[-1])
-        avg_volume = float(volume_ma.iloc[-1])
-        volume_ratio = current_volume / avg_volume if avg_volume > 0 else 1
-
-        # Prezzi attuali
-        current_close = float(df_5min['close'].iloc[-1])
-        current_open = float(df_5min['open'].iloc[-1])
-        prev_close = float(df_5min['close'].iloc[-2])
-
-        # ---- VERIFICA BREAKOUT RIALZISTA ----
-        signal = 'HOLD'
-        breakout_type = None
-        target_level = None
-        details = {}
-
-        for resistance in levels['resistance'][:3]:  # Controlla i 3 livelli più vicini
-            # Il prezzo ha superato la resistenza?
-            if current_close > resistance and prev_close <= resistance:
-                # Conferma volume
-                volume_confirmed = volume_ratio >= self.volume_multiplier
-
-                # Filtro ADX (trend forte)
-                adx_confirmed = adx_current >= self.adx_min
-
-                # Anti falso breakout: la candela deve chiudersi sopra il livello
-                candle_confirmed = current_close > resistance if self.wait_candle_close else True
-
-                if volume_confirmed and candle_confirmed:
-                    signal = 'BUY'
-                    breakout_type = 'breakout_up'
-                    target_level = resistance
-
-                    details = {
-                        'type': 'BREAKOUT RIALZISTA',
-                        'level_broken': resistance,
-                        'close': current_close,
-                        'volume_ratio': volume_ratio,
-                        'adx': adx_current,
-                        'adx_ok': adx_confirmed,
-                        'volume_ok': volume_confirmed,
-                    }
-                    logger.info(f"[{symbol}] BREAKOUT UP: {current_close:.2f} > {resistance:.2f} | Vol: {volume_ratio:.1f}x | ADX: {adx_current:.1f}")
-                    break
-
-        # ---- VERIFICA BREAKDOWN RIBASSISTA ----
-        if signal == 'HOLD':
-            for support in levels['support'][:3]:
-                if current_close < support and prev_close >= support:
-                    volume_confirmed = volume_ratio >= self.volume_multiplier
-                    candle_confirmed = current_close < support if self.wait_candle_close else True
-
-                    if volume_confirmed and candle_confirmed:
-                        signal = 'SELL'
-                        breakout_type = 'breakdown'
-                        target_level = support
-
-                        details = {
-                            'type': 'BREAKDOWN RIBASSISTA',
-                            'level_broken': support,
-                            'close': current_close,
-                            'volume_ratio': volume_ratio,
-                            'adx': adx_current,
-                        }
-                        logger.info(f"[{symbol}] BREAKDOWN: {current_close:.2f} < {support:.2f} | Vol: {volume_ratio:.1f}x")
-                        break
-
-        # Calcola target e stop dinamici basati su ATR
-        stop_loss = None
-        take_profit = None
-
-        if signal == 'BUY' and target_level:
-            stop_loss = current_close - (atr * 2)  # 2x ATR come stop
-            take_profit = current_close + (atr * 3)  # 3x ATR come target
-
-        elif signal == 'SELL' and target_level:
-            stop_loss = current_close + (atr * 2)
-            take_profit = current_close - (atr * 3)
-
-        # Aggiungi ADX al filtro di qualità del segnale
-        adx_warning = None
-        if signal != 'HOLD' and adx_current < self.adx_min:
-            adx_warning = f"ADX basso ({adx_current:.1f} < {self.adx_min}): trend debole"
-            logger.warning(f"[{symbol}] {adx_warning}")
-
-        return {
-            'signal': signal,
-            'strategy': 'breakout',
-            'symbol': symbol,
-            'timestamp': datetime.now().isoformat(),
-            'breakout_type': breakout_type,
-            'level': target_level,
-            'stop_loss_atr': round(stop_loss, 4) if stop_loss else None,
-            'take_profit_atr': round(take_profit, 4) if take_profit else None,
-            'atr': atr,
-            'adx': adx_current,
-            'volume_ratio': volume_ratio,
-            'adx_warning': adx_warning,
-            'levels': levels,
-            'details': details,
-        }
+            logger.error(f"Errore calcolo Bollinger Bands: {e}")
+            return None
 
     def analyze(self, df_5min: pd.DataFrame, df_daily: pd.DataFrame, symbol: str) -> Dict:
         """
-        Punto di entrata principale per l'analisi breakout.
+        Analizza squeeze e breakout Bollinger Bands.
 
-        Args:
-            df_5min: Dati 5 minuti
-            df_daily: Dati giornalieri per supporti/resistenze
-            symbol: Simbolo
-
-        Returns:
-            Segnale di trading
+        Logica:
+        1. Squeeze detection: bandwidth < 0.5% → aspetta breakout
+        2. Breakout: prezzo rompe BB + volume spike → entrata
+        3. Mean reversion: prezzo tange BB + RSI extreme → entrata
         """
-        return self.detect_breakout(df_5min, df_daily, symbol)
+        if not self.enabled:
+            return {'signal': 'HOLD', 'score': 0, 'reason': 'Strategia disabilitata'}
+
+        # Usa il DataFrame passato (df_5min, che contiene dati 1min dall'engine)
+        df = self.calculate_bollinger_squeeze(df_5min)
+
+        if df is None or len(df) < 2:
+            return {'signal': 'HOLD', 'score': 0, 'reason': 'Dati insufficienti'}
+
+        last = df.iloc[-1]
+        prev = df.iloc[-2]
+
+        close = float(last.get('close', 0))
+        bb_upper = float(last.get('bb_upper', 0))
+        bb_lower = float(last.get('bb_lower', 0))
+        bb_middle = float(last.get('bb_middle', 0))
+        bandwidth_pct = float(last.get('bandwidth_pct', 1.0))
+        rsi = float(last.get('rsi', 50))
+        volume_ratio = float(last.get('volume_ratio', 1.0))
+
+        prev_close = float(prev.get('close', 0))
+
+        signal = 'HOLD'
+        score = 0
+        squeeze_status = 'NORMAL'
+        details = {}
+
+        # ---- 1. Squeeze Detection ----
+        is_squeeze = bandwidth_pct < self.squeeze_threshold
+        squeeze_status = f"SQUEEZE ({bandwidth_pct*100:.2f}%)" if is_squeeze else f"NORMAL ({bandwidth_pct*100:.2f}%)"
+        details['squeeze_status'] = squeeze_status
+
+        # ---- 2. Breakout (squeeze breakout oppure normale) ----
+        # BUY: prezzo rompe sopra BB_upper + volume spike
+        if close > bb_upper and prev_close <= bb_upper:
+            details['breakout'] = f"BULLISH (price > BB_upper: {close:.2f} > {bb_upper:.2f})"
+
+            # Volume confirmation
+            if volume_ratio >= self.breakout_volume_mult:
+                score += 2
+                details['volume'] = f"OK ({volume_ratio:.2f}x)"
+            else:
+                score += 1
+                details['volume'] = f"LOW ({volume_ratio:.2f}x)"
+
+            # RSI check: non troppo overbought
+            if rsi < self.rsi_overbought:
+                score += 1
+                details['rsi'] = f"OK ({rsi:.1f})"
+            else:
+                details['rsi'] = f"OVERBOUGHT ({rsi:.1f})"
+
+            if score >= 2:
+                signal = 'BUY'
+                details['logic'] = "Breakout bullish + volume"
+
+        # SELL: prezzo rompe sotto BB_lower + volume spike
+        elif close < bb_lower and prev_close >= bb_lower:
+            details['breakout'] = f"BEARISH (price < BB_lower: {close:.2f} < {bb_lower:.2f})"
+
+            # Volume confirmation
+            if volume_ratio >= self.breakout_volume_mult:
+                score += 2
+                details['volume'] = f"OK ({volume_ratio:.2f}x)"
+            else:
+                score += 1
+                details['volume'] = f"LOW ({volume_ratio:.2f}x)"
+
+            # RSI check: non troppo oversold
+            if rsi > self.rsi_oversold:
+                score += 1
+                details['rsi'] = f"OK ({rsi:.1f})"
+            else:
+                details['rsi'] = f"OVERSOLD ({rsi:.1f})"
+
+            if score >= 2:
+                signal = 'SELL'
+                details['logic'] = "Breakdown bearish + volume"
+
+        # ---- 3. Mean Reversion (se no breakout) ----
+        else:
+            # BUY: prezzo tocca BB_lower + RSI oversold (rimbalzo dal basso)
+            if (close <= bb_lower * 1.005 and  # Entro 0.5% da BB_lower
+                    rsi < self.rsi_oversold and
+                    volume_ratio >= 1.0):
+                score = 2
+                signal = 'BUY'
+                details['logic'] = "Mean reversion: BB_lower touch + oversold RSI"
+                details['rsi'] = f"OVERSOLD ({rsi:.1f})"
+
+            # SELL: prezzo tocca BB_upper + RSI overbought (rimbalzo dal alto)
+            elif (close >= bb_upper * 0.995 and  # Entro 0.5% da BB_upper
+                    rsi > self.rsi_overbought and
+                    volume_ratio >= 1.0):
+                score = 2
+                signal = 'SELL'
+                details['logic'] = "Mean reversion: BB_upper touch + overbought RSI"
+                details['rsi'] = f"OVERBOUGHT ({rsi:.1f})"
+
+            # No signal
+            else:
+                if close > bb_lower and close < bb_upper:
+                    bb_pct = (close - bb_lower) / (bb_upper - bb_lower) if (bb_upper - bb_lower) > 0 else 0.5
+                    details['position'] = f"Middle zone ({bb_pct*100:.0f}%)"
+                else:
+                    details['position'] = "Outside BB bands"
+
+        result = {
+            'signal': signal,
+            'score': score,
+            'strategy': 'breakout',
+            'symbol': symbol,
+            'timestamp': datetime.now().isoformat(),
+            'details': details,
+            'indicators': {
+                'close': close,
+                'bb_upper': bb_upper,
+                'bb_middle': bb_middle,
+                'bb_lower': bb_lower,
+                'bandwidth_pct': bandwidth_pct,
+                'squeeze_detected': is_squeeze,
+                'rsi': rsi,
+                'volume_ratio': volume_ratio,
+            }
+        }
+
+        logger.info(
+            f"[{symbol}] Bollinger Squeeze: {signal} ({score}) | "
+            f"Price={close:.2f} | Squeeze={squeeze_status} | RSI={rsi:.1f}"
+        )
+        return result
