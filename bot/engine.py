@@ -159,11 +159,26 @@ class TradingEngine:
             return
 
         # Carica capitale virtuale da file (se bot già avviato in precedenza)
+        # Carica capitale dal file (se esiste) o usa config
         self._virtual_capital = self._load_virtual_capital()
         self._daily_starting_capital = self._virtual_capital
         self._weekly_starting_capital = self._virtual_capital
 
+        # Verifica se capital_eur è cambiato (e.g., da €500 a €2500)
+        # Se cambiato, ricalcola il capitale virtuale
         capital_eur = self.config.get('trading', {}).get('capital_eur', 500)
+        expected_virtual_capital = capital_eur * self._eur_usd_rate
+
+        if abs(self._virtual_capital - expected_virtual_capital) > 1:  # Tolleranza $1
+            logger.warning(
+                f"Rilevato cambio capitale: era ${self._virtual_capital:.2f}, "
+                f"ora €{capital_eur} = ${expected_virtual_capital:.2f}"
+            )
+            self._initial_virtual_capital = expected_virtual_capital
+            self._virtual_capital = expected_virtual_capital
+            self._daily_starting_capital = expected_virtual_capital
+            self._weekly_starting_capital = expected_virtual_capital
+
         logger.info(f"Capitale virtuale: €{capital_eur} = ${self._virtual_capital:.2f} USD")
         logger.info(f"(Account Alpaca paper: $100,000 — usato solo come esecutore ordini)")
 
