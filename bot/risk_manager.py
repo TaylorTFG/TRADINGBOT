@@ -169,6 +169,108 @@ class RiskManager:
         )
         return result
 
+    def calculate_atr_based_stops(
+        self,
+        df_1min,
+        entry_price: float,
+        atr_period: int = 7
+    ) -> Dict:
+        """
+        Calcola SL e TP dinamici basati su ATR (volatilità del mercato).
+
+        Formula:
+        - SL = 1.2 × ATR(7), bounds [0.3%, 1.0%]
+        - TP = 2.5 × ATR(7), bounds [0.7%, 2.5%]
+        - Trailing: activation 1.2×ATR, distance 0.4%
+
+        Questo adatta il rischio alla volatilità:
+        - Mercato volatile: SL/TP più ampi
+        - Mercato stabile: SL/TP più stretti
+        """
+        if df_1min is None or len(df_1min) < atr_period + 5:
+            # Fallback a fixed SL/TP se dati insufficienti
+            return {
+                'sl_pct': self.stop_loss_pct,
+                'tp_pct': self.take_profit_pct,
+                'trailing_activation': self.trailing_activation,
+                'trailing_distance': self.trailing_distance,
+                'atr_used': False,
+                'atr_value': None,
+                'reason': 'Dati insufficienti, fallback a fixed SL/TP'
+            }
+
+        try:
+            import pandas as pd
+            # Calcola ATR manualmente o usa libreria ta se disponibile
+            high = df_1min['high']
+            low = df_1min['low']
+            close = df_1min['close']
+
+            # True Range
+            tr1 = high - low
+            tr2 = (high - close.shift(1)).abs()
+            tr3 = (low - close.shift(1)).abs()
+            true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+
+            # ATR = media mobile del True Range
+            atr = true_range.rolling(window=atr_period).mean()
+            atr_current = float(atr.iloc[-1]) if pd.notna(atr.iloc[-1]) else None
+
+            if atr_current is None or atr_current == 0:
+                return {
+                    'sl_pct': self.stop_loss_pct,
+                    'tp_pct': self.take_profit_pct,
+                    'trailing_activation': self.trailing_activation,
+                    'trailing_distance': self.trailing_distance,
+                    'atr_used': False,
+                    'atr_value': None,
+                    'reason': 'ATR non disponibile'
+                }
+
+            # Calcola percentuali basate su ATR
+            atr_pct = atr_current / entry_price
+
+            # SL: 1.2 × ATR, bounds [0.3%, 1.0%]
+            sl_pct = min(0.010, max(0.003, 1.2 * atr_pct))
+
+            # TP: 2.5 × ATR, bounds [0.7%, 2.5%]
+            tp_pct = min(0.025, max(0.007, 2.5 * atr_pct))
+
+            # Trailing: activation 1.2×ATR, distance 0.4%
+            trailing_activation = 1.2 * atr_pct
+            trailing_distance = 0.004
+
+            result = {
+                'sl_pct': round(sl_pct, 5),
+                'tp_pct': round(tp_pct, 5),
+                'trailing_activation': round(trailing_activation, 5),
+                'trailing_distance': trailing_distance,
+                'atr_used': True,
+                'atr_value': round(atr_current, 4),
+                'atr_pct': round(atr_pct * 100, 3),
+                'reason': f'ATR={atr_current:.4f} ({atr_pct*100:.3f}%)'
+            }
+
+            logger.debug(
+                f"ATR-based stops: SL={sl_pct*100:.2f}% ({sl_pct*entry_price:.2f}), "
+                f"TP={tp_pct*100:.2f}% ({tp_pct*entry_price:.2f}), "
+                f"ATR={atr_current:.4f}"
+            )
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Errore calcolo ATR-based stops: {e}")
+            return {
+                'sl_pct': self.stop_loss_pct,
+                'tp_pct': self.take_profit_pct,
+                'trailing_activation': self.trailing_activation,
+                'trailing_distance': self.trailing_distance,
+                'atr_used': False,
+                'atr_value': None,
+                'reason': f'Errore: {str(e)}'
+            }
+
     # ----------------------------------------------------------------
     # STOP LOSS E TRAILING STOP
     # ----------------------------------------------------------------

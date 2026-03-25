@@ -28,6 +28,11 @@ from bot.news_analyzer import NewsAnalyzer
 from bot.meta_strategy import MetaStrategy
 from bot.ml_filter import MLFilter
 from bot.notifications import TelegramNotifier
+from bot.regime_detector import RegimeDetector
+from bot.correlation_guard import CorrelationGuard
+from bot.session_scorer import SessionScorer
+from bot.kelly_sizing import KellySizing
+from bot.performance_tracker import PerformanceTracker
 
 logger = logging.getLogger(__name__)
 IT_TZ = ZoneInfo("Europe/Rome")
@@ -124,7 +129,23 @@ class TradingEngine:
         # Notifiche Telegram
         self.notifier = TelegramNotifier(self.config)
 
-        logger.info("Tutti i componenti inizializzati")
+        # ---- NUOVI MODULI (8 Modifiche) ----
+        # Regime Detector (classifica mercato TRENDING/RANGING/UNDEFINED)
+        self.regime_detector = RegimeDetector(self.config)
+
+        # Correlation Guard (evita posizioni correlate)
+        self.correlation_guard = CorrelationGuard()
+
+        # Session Scorer (valuta qualità sessione 0-10)
+        self.session_scorer = SessionScorer(self.config, self.db)
+
+        # Kelly Sizing (position sizing basato su edge)
+        self.kelly_sizing = KellySizing(self.config, self.db)
+
+        # Performance Tracker (metriche avanzate)
+        self.performance_tracker = PerformanceTracker(self.config, self.db)
+
+        logger.info("Tutti i componenti inizializzati (inclusi 5 nuovi moduli)")
 
     def _setup_scheduled_tasks(self):
         """Pianifica i task periodici (report, retraining ML, ecc.)."""
@@ -295,14 +316,32 @@ class TradingEngine:
                     self.paused = True
                 return
 
-        # --- FASE 4: Contesto macro ---
+        # --- FASE 4: Regime Detection (NUOVO) ---
+        # Classifica il mercato e seleziona strategie rilevanti
+        best_assets_temp = self._select_best_assets()
+        if best_assets_temp:
+            try:
+                df_1min = self.broker.get_bars(best_assets_temp[0], '1m', limit=50)
+                regime_info = self.regime_detector.detect_regime(df_1min)
+                self._current_regime = regime_info
+            except:
+                self._current_regime = {'regime': 'UNDEFINED', 'strategy_mask': [True, True, True, True]}
+        else:
+            self._current_regime = {'regime': 'UNDEFINED', 'strategy_mask': [True, True, True, True]}
+
+        # --- FASE 5: Session Scoring (NUOVO) ---
+        # Valuta qualità della sessione per adaptive sizing
+        session_info = self.session_scorer.calculate_session_score()
+        self._session_size_multiplier = session_info.get('size_multiplier', 1.0)
+
+        # --- FASE 6: Contesto macro ---
         if self.market_context.should_stop_trading():
             logger.warning("Condizioni macro avverse - stop nuovi acquisti")
             return
 
         macro_multiplier = self.market_context.get_size_multiplier()
 
-        # --- FASE 5: Monitora posizioni aperte ---
+        # --- FASE 7: Monitora posizioni aperte ---
         self._monitor_open_positions(current_capital)
 
         # --- FASE 6: Verifica se ML deve essere riaddestrato ---
@@ -465,6 +504,15 @@ class TradingEngine:
             logger.debug(f"[{symbol}] {pos_check['reason']}")
             return
 
+        # ---- CORRELAZIONE GUARD (NUOVO) ----
+        # Blocca posizioni su asset correlati
+        can_open_corr, reason_corr = self.correlation_guard.can_open_position(
+            symbol, 'BUY', open_trades
+        )
+        if not can_open_corr:
+            logger.debug(f"[{symbol}] {reason_corr}")
+            return
+
         # Recupera dati di mercato
         df_5min = self.broker.get_recent_bars(symbol, '5m', 200)
         df_15min = self.broker.get_recent_bars(symbol, '15m', 100)
@@ -498,14 +546,20 @@ class TradingEngine:
         # --- Analisi Strategia 4: Liquidity Hunt (Sweep Detection + MFI) ---
         signal_4 = self.strategy_liquidity.analyze(df_with_indicators, df_5min, symbol)
 
-        # --- Sistema di Voto Meta-Strategy (con filtri trend 5min + EMA 200) ---
+        # --- Sistema di Voto Meta-Strategy (con regime detection + strategy mask) ---
         current_price = float(df_5min.iloc[-1]['close']) if df_5min is not None and len(df_5min) > 0 else 0
+
+        # Usa strategy_mask dal regime detector per filtrare strategie
+        strategy_mask = self._current_regime.get('strategy_mask', [True, True, True, True])
+
         vote_result = self.meta_strategy.vote(
             signal_1, signal_2, signal_3, signal_4,
             symbol,
             df_5min=df_5min,
             df_daily=df_daily,
-            current_price=current_price
+            current_price=current_price,
+            strategy_mask=strategy_mask,  # NUOVO: regime-based filtering
+            regime_info=self._current_regime  # NUOVO: passa regime per context
         )
         final_signal = vote_result['final_signal']
         vote_score = vote_result['vote_score']
@@ -539,7 +593,7 @@ class TradingEngine:
             # ML disabled: approva automaticamente il segnale
             ml_result = {'approved': True, 'confidence': 1.0, 'reason': 'ML disabled for scalping'}
 
-        # --- Calcolo Position Sizing ---
+        # --- Calcolo Position Sizing (con Kelly sizing e Session scoring) ---
         current_price = self.broker.get_latest_price(symbol)
         if not current_price:
             logger.warning(f"[{symbol}] Impossibile ottenere prezzo corrente")
@@ -553,6 +607,20 @@ class TradingEngine:
             vote_score=abs(vote_score),
             macro_multiplier=macro_multiplier
         )
+
+        # ---- KELLY SIZING (NUOVO) ----
+        # Calcola sizing basato su Kelly Criterion
+        kelly_info = self.kelly_sizing.calculate_kelly_fraction()
+        kelly_multiplier = kelly_info.get('position_size_pct', 0.15) / 0.15  # Normalizza rispetto a default 15%
+
+        # ---- SESSION SCORING (NUOVO) ----
+        # Applica moltiplicatore basato su qualità sessione
+        session_multiplier = self._session_size_multiplier
+
+        # Combina tutti i moltiplicatori
+        final_multiplier = macro_multiplier * kelly_multiplier * session_multiplier
+        position_size['qty'] = position_size['qty'] * final_multiplier
+        position_size['capital_at_risk'] = position_size['capital_at_risk'] * final_multiplier
 
         if position_size['qty'] <= 0:
             logger.warning(f"[{symbol}] Quantità calcolata = 0, operazione saltata")
@@ -591,17 +659,31 @@ class TradingEngine:
         ml_result: Dict
     ):
         """
-        Esegue un ordine di acquisto.
+        Esegue un ordine di acquisto con ATR-based stops dinamici.
 
         Args:
             symbol: Simbolo da comprare
             qty: Quantità
             price: Prezzo corrente
-            stop_loss: Prezzo stop loss
-            take_profit: Prezzo take profit
+            stop_loss: Prezzo stop loss (default, può essere sovrascritto da ATR)
+            take_profit: Prezzo take profit (default, può essere sovrascritto da ATR)
             vote_result: Risultato del sistema di voto
             ml_result: Risultato del filtro ML
         """
+        # ---- ATR-BASED STOPS (NUOVO) ----
+        # Calcola SL/TP dinamici basati su volatilità
+        try:
+            df_1min = self.broker.get_recent_bars(symbol, '1m', 50)
+            atr_result = self.risk_manager.calculate_atr_based_stops(df_1min, price)
+
+            if atr_result.get('atr_used', False):
+                # Usa stops ATR-based
+                stop_loss = price * (1 - atr_result['sl_pct'])
+                take_profit = price * (1 + atr_result['tp_pct'])
+                logger.debug(f"[{symbol}] ATR-based stops: SL={atr_result['sl_pct']*100:.2f}%, TP={atr_result['tp_pct']*100:.2f}% (ATR={atr_result['atr_value']:.4f})")
+        except Exception as e:
+            logger.warning(f"[{symbol}] Errore ATR calc, uso fixed: {e}")
+
         logger.info(
             f"[{symbol}] ACQUISTO: qty={qty:.4f}, price=${price:.2f}, "
             f"SL=${stop_loss:.2f}, TP=${take_profit:.2f} | "

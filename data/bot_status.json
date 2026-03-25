@@ -1,7 +1,7 @@
 {
-  "status": "started",
-  "status_it": "AVVIATO",
-  "timestamp": "2026-03-25T14:00:51.653946+01:00",
+  "status": "stopped",
+  "status_it": "FERMATO",
+  "timestamp": "2026-03-25T16:21:17.900460+01:00",
   "reason": "",
   "mode": "paper"
 }

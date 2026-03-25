@@ -469,6 +469,142 @@ def page_performance():
 
 
 # ============================================================
+# ADVANCED METRICS - PERFORMANCE ANALYTICS (NUOVO)
+# ============================================================
+
+def page_analytics():
+    """Pagina con metriche avanzate di performance tracking."""
+
+    st.title("🎯 Advanced Performance Analytics")
+
+    db = get_database()
+    if not db:
+        st.error("Database non disponibile")
+        return
+
+    # Carica tutti i trade per analisi
+    try:
+        # Tenta di caricare metriche avanzate se PerformanceTracker è disponibile
+        trades = db.get_trade_history(limit=500)
+
+        if not trades or len(trades) < 5:
+            st.info("Dati insufficienti per analisi avanzate (serve min. 5 trade)")
+            return
+
+        # ---- ROW 1: Rolling Win Rates ----
+        st.subheader("📊 Rolling Win Rates")
+        col1, col2, col3 = st.columns(3)
+
+        # Calcola win rates su differenti finestre
+        def calc_wr(trades_list, limit):
+            recent = trades_list[:limit]
+            if not recent:
+                return 0
+            wins = len([t for t in recent if t.get('pnl', 0) > 0])
+            return wins / len(recent) * 100
+
+        wr_50 = calc_wr(trades, 50)
+        wr_100 = calc_wr(trades, 100)
+        wr_500 = calc_wr(trades, 500)
+
+        with col1:
+            st.metric("Last 50 Trades", f"{wr_50:.1f}%", delta="Win Rate")
+        with col2:
+            st.metric("Last 100 Trades", f"{wr_100:.1f}%", delta="Win Rate")
+        with col3:
+            st.metric("All Time (500)", f"{wr_500:.1f}%", delta="Win Rate")
+
+        # ---- ROW 2: Edge Metrics ----
+        st.subheader("💎 Edge & Profitability Metrics")
+        col1, col2, col3, col4 = st.columns(4)
+
+        # Expected Value
+        total_pnl = sum([t.get('pnl', 0) for t in trades])
+        ev_per_trade = total_pnl / len(trades) if trades else 0
+
+        # Profit Factor
+        gross_profit = sum([t['pnl'] for t in trades if t.get('pnl', 0) > 0])
+        gross_loss = sum([abs(t['pnl']) for t in trades if t.get('pnl', 0) <= 0])
+        pf = gross_profit / gross_loss if gross_loss > 0 else 1.0
+
+        # Average Win/Loss
+        wins = [t for t in trades if t.get('pnl', 0) > 0]
+        losses = [t for t in trades if t.get('pnl', 0) <= 0]
+        avg_win = sum([t['pnl'] for t in wins]) / len(wins) if wins else 0
+        avg_loss = sum([abs(t['pnl']) for t in losses]) / len(losses) if losses else 0
+
+        with col1:
+            st.metric("Expected Value", f"${ev_per_trade:+.2f}", delta="per trade")
+        with col2:
+            st.metric("Profit Factor", f"{pf:.2f}x", delta=f"${gross_profit:.0f}/${abs(gross_loss):.0f}")
+        with col3:
+            st.metric("Avg Win", f"${avg_win:+.2f}")
+        with col4:
+            st.metric("Avg Loss", f"${avg_loss:+.2f}")
+
+        # ---- ROW 3: Streak Analysis ----
+        st.subheader("🔥 Trade Streaks")
+        col1, col2 = st.columns(2)
+
+        max_win_streak = 0
+        max_loss_streak = 0
+        current_win_streak = 0
+        current_loss_streak = 0
+
+        for t in trades:
+            if t.get('pnl', 0) > 0:
+                current_win_streak += 1
+                current_loss_streak = 0
+                max_win_streak = max(max_win_streak, current_win_streak)
+            else:
+                current_loss_streak += 1
+                current_win_streak = 0
+                max_loss_streak = max(max_loss_streak, current_loss_streak)
+
+        with col1:
+            st.metric("Max Win Streak", f"{max_win_streak} trades", delta="consecutive wins")
+        with col2:
+            st.metric("Max Loss Streak", f"{max_loss_streak} trades", delta="consecutive losses")
+
+        # ---- ROW 4: Trade Distribution ----
+        st.subheader("📈 Trade Distribution by Strategy")
+
+        strategies = {}
+        for t in trades:
+            strategy = t.get('strategy', 'unknown')
+            if strategy not in strategies:
+                strategies[strategy] = {'count': 0, 'pnl': 0, 'wins': 0}
+            strategies[strategy]['count'] += 1
+            strategies[strategy]['pnl'] += t.get('pnl', 0)
+            if t.get('pnl', 0) > 0:
+                strategies[strategy]['wins'] += 1
+
+        # Tabella strategie
+        strategy_data = []
+        for strat, data in strategies.items():
+            wr = (data['wins'] / data['count'] * 100) if data['count'] > 0 else 0
+            avg = data['pnl'] / data['count'] if data['count'] > 0 else 0
+            strategy_data.append({
+                'Strategy': strat,
+                'Trades': data['count'],
+                'P&L': f"${data['pnl']:+.2f}",
+                'Win Rate': f"{wr:.1f}%",
+                'Avg/Trade': f"${avg:+.2f}"
+            })
+
+        if strategy_data:
+            df_strategies = pd.DataFrame(strategy_data)
+            st.dataframe(df_strategies, use_container_width=True, hide_index=True)
+
+        # ---- Footer ----
+        st.divider()
+        st.caption("💡 Advanced metrics aggiornati in tempo reale dal PerformanceTracker")
+
+    except Exception as e:
+        st.error(f"Errore caricamento metriche: {e}")
+
+
+# ============================================================
 # MAIN APP
 # ============================================================
 
@@ -480,7 +616,7 @@ def main():
 
         page = st.radio(
             "Navigation",
-            ["📊 Overview", "⚙️ Configuration", "📈 Performance 6H"],
+            ["📊 Overview", "⚙️ Configuration", "📈 Performance 6H", "🎯 Advanced Metrics"],
             key="page_nav"
         )
 
@@ -490,6 +626,8 @@ def main():
         page_config()
     elif page == "📈 Performance 6H":
         page_performance()
+    elif page == "🎯 Advanced Metrics":
+        page_analytics()
 
     # Auto-refresh
     st.sidebar.divider()

@@ -18,12 +18,6 @@ trading:
   # Tasso di cambio EUR/USD usato per la conversione
   eur_usd_rate: 1.09
 
-  # Numero massimo di posizioni aperte contemporaneamente
-  max_open_positions: 4
-
-  # Chiusura forzata posizioni prima della chiusura mercato (ora IT)
-  force_close_time: "23:58"
-
   # Fuso orario operativo
   timezone: "Europe/Rome"
 
@@ -52,42 +46,31 @@ assets:
     enabled: false
     symbols: ["SPY", "QQQ", "IWM", "XLK", "XLV", "XLF", "GLD"]
 
-  # Priorità 2: Azioni ad alta liquidità (blue-chip + growth) - 10 STOCKS
+  # Priorità 2: Azioni ad alta liquidità (quality only) - 4 STOCKS
   stocks:
     enabled: true
     symbols: [
       "NVDA",     # NVIDIA - AI boom, altissima volatilità, volume eccezionale
       "TSLA",     # Tesla - alta volatilità, spread basso
-      "AAPL",     # Apple - blue chip, volume massimo
       "AMD",      # AMD - semiconduttori, alta volatilità
-      "META",     # Meta - tech growth, buon volume
-      "AMZN",     # Amazon - blue chip, volume altissimo
-      "MSFT",     # Microsoft - blue chip, volume massimo
-      "QQQ",      # Nasdaq-100 ETF - trend tech, volume eccezionale
-      "TQQQ",     # 3x Nasdaq ETF - volatilità 3x, per swing
-      "SPY"       # S&P 500 ETF - benchmark, volume massimo
+      "SPY"       # S&P 500 ETF - benchmark diversificazione
     ]
 
   # Priorità 3: Crypto (24/7, alta volatilità, trend forti)
-  # TOP 9 per volume, spread basso, liquidity alta su Alpaca
+  # TOP 4 per volume, spread basso, liquidity alta su Alpaca
   crypto:
     enabled: true
     symbols: [
       "BTC/USD",    # Bitcoin - massimo volume globale
       "ETH/USD",    # Ethereum - volume eccezionale
       "SOL/USD",    # Solana - high volatility + spread basso
-      "LDO/USD",    # Lido - volume altissimo, spread stretto
-      "ARB/USD",    # Arbitrum - alta liquidità, spread ottimo
-      "OP/USD",     # Optimism - liquidity forte, spread basso
-      "XRP/USD",    # Ripple - volume eccezionale, spread stretto
-      "DOGE/USD",   # Dogecoin - volatility alta, liquidità buona
-      "AVAX/USD"    # Avalanche - high vol, spread accettabile
+      "XRP/USD"     # Ripple - volume eccezionale, spread stretto
     ]
 
   # Numero massimo di asset da analizzare contemporaneamente
-  # UPGRADE: 19 asset totali (9 crypto + 10 stocks) competono per 4 slot
-  # Il bot seleziona i 4 con i migliori segnali in base al voting system
-  max_assets_per_cycle: 19
+  # WHITELIST: 8 asset totali (4 crypto + 4 stocks) per qualità superiore
+  # Quality over quantity: ridurre slippage, aumentare profitti netti
+  max_assets_per_cycle: 8
 
   # Chiusura forzata posizioni azionarie 2 minuti prima chiusura mercato USA
   # 21:58 IT = 16:00 USA (chiusura ufficiale 16:00 EST)
@@ -125,8 +108,8 @@ strategy_confluence:
   # RSI - Relative Strength Index (periodo 7 per reattività scalping)
   rsi:
     period: 7
-    oversold: 35     # RSI < 35 per BUY
-    overbought: 65   # RSI > 65 per SELL
+    oversold: 32     # RSI < 32 per BUY (ridotto per meno false positives)
+    overbought: 68   # RSI > 68 per SELL (aumentato per meno false positives)
 
   # EMA - Exponential Moving Average (veloce per scalping 1min)
   ema:
@@ -137,7 +120,7 @@ strategy_confluence:
   # ATR - Average True Range (check mercato non piatto)
   atr:
     period: 7
-    min_volatility_pct: 0.0005  # ATR deve essere > 0.05% del prezzo
+    min_volatility_pct: 0.0002  # ATR deve essere > 0.02% del prezzo (ridotto per più trades)
 
   # Volume filter
   volume:

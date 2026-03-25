@@ -114,7 +114,9 @@ class MetaStrategy:
         symbol: str,
         df_5min=None,
         df_daily=None,
-        current_price: Optional[float] = None
+        current_price: Optional[float] = None,
+        strategy_mask: Optional[List[bool]] = None,  # NUOVO: regime-based filtering
+        regime_info: Optional[Dict] = None  # NUOVO: regime detection info
     ) -> Dict:
         """
         Raccoglie i voti dalle 4 strategie e calcola il segnale finale.
@@ -122,6 +124,7 @@ class MetaStrategy:
         Applica filtri contestuali:
         - Trend 5min (EMA 20) per protezione breve termine
         - EMA 200 daily (trend globale) per direzione operazioni
+        - Regime detection (TRENDING/RANGING) per selezione strategie rilevanti
 
         Args:
             confluence_signal: Segnale dalla Strategia 1 (confluenza EMA)
@@ -132,6 +135,8 @@ class MetaStrategy:
             df_5min: DataFrame 5min per filtro trend 5min
             df_daily: DataFrame daily per filtro EMA 200
             current_price: Prezzo corrente per validazione EMA 200
+            strategy_mask: List[bool] (4 elementi) - quali strategie attivare per regime
+            regime_info: Dict con info regime detection (regime, confidence, ...)
 
         Returns:
             Dizionario con final_signal, vote_score, action, details
@@ -152,6 +157,19 @@ class MetaStrategy:
             'sentiment': sentiment_signal.get('signal', 'HOLD'),
             'liquidity': liquidity_signal.get('signal', 'HOLD'),
         }
+
+        # ---- APPLICA STRATEGY MASK (REGIME DETECTION) ----
+        # Filtra strategie non rilevanti basato su regime market
+        if strategy_mask is None:
+            strategy_mask = [True, True, True, True]  # Default: tutti attivi
+
+        strategy_names = ['confluence', 'breakout', 'sentiment', 'liquidity']
+        regime_str = regime_info.get('regime', 'UNDEFINED') if regime_info else 'UNDEFINED'
+
+        for i, (strategy_name, enabled) in enumerate(zip(strategy_names, strategy_mask)):
+            if not enabled:
+                logger.debug(f"[{symbol}] Strategia {strategy_name} disabilitata in regime {regime_str}")
+                votes[strategy_name] = 'HOLD'
 
         # ---- APPLICA FILTRO TREND 5min ----
         # Se trend 5min è BEARISH, blocca i segnali BUY (aspetta un segnale SELL prima)
@@ -295,7 +313,8 @@ class MetaStrategy:
             'symbol': symbol,
             'timestamp': datetime.now().isoformat(),
             'votes': votes,
-            'trend_5min': trend_5min,  # Aggiungi il trend 5min ai risultati
+            'trend_5min': trend_5min,  # Filtro trend 5min
+            'regime_info': regime_info,  # NUOVO: Info regime detection (TRENDING/RANGING)
             'signal_details': signal_details,
             'strategy_name': self._get_leading_strategy(votes, confluence_signal, breakout_signal, sentiment_signal)
         }
