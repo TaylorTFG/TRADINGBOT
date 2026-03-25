@@ -72,10 +72,6 @@ assets:
   # Quality over quantity: ridurre slippage, aumentare profitti netti
   max_assets_per_cycle: 8
 
-  # Chiusura forzata posizioni azionarie 2 minuti prima chiusura mercato USA
-  # 21:58 IT = 16:00 USA (chiusura ufficiale 16:00 EST)
-  force_close_time: "21:58"
-
 # ------------------------------------------------------------
 # FINESTRE ORARIE OPERATIVE (ora italiana)
 # Il bot opera solo nelle finestre orarie indicate

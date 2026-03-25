@@ -126,8 +126,9 @@ class TradingEngine:
         # ML Filter
         self.ml_filter = MLFilter(self.config, self.db)
 
-        # Notifiche Telegram
-        self.notifier = TelegramNotifier(self.config)
+        # Notifiche Telegram (disabilitato per locale)
+        # self.notifier = TelegramNotifier(self.config)
+        self.notifier = None  # Disabilitato localmente
 
         # ---- NUOVI MODULI (8 Modifiche) ----
         # Regime Detector (classifica mercato TRENDING/RANGING/UNDEFINED)
@@ -208,7 +209,9 @@ class TradingEngine:
         logger.info(f"(Account Alpaca paper: $100,000 — usato solo come esecutore ordini)")
 
         # Notifica avvio
-        self.notifier.notify_bot_status('started')
+        if self.notifier:
+            if self.notifier:
+                self.notifier.notify_bot_status('started')
 
         # Segna data inizio paper trading
         if self.config['trading']['mode'] == 'paper':
@@ -255,14 +258,17 @@ class TradingEngine:
                 logger.info(f"Chiusura {len(open_positions)} posizioni aperte...")
                 self.broker.close_all_positions()
 
-        self.notifier.notify_bot_status('stopped')
+        if self.notifier:
+            self.notifier.notify_bot_status('stopped')
         logger.info("Bot fermato")
 
     def pause(self):
         """Mette il bot in pausa (senza chiudere posizioni)."""
         self.paused = True
         logger.info("Bot messo in pausa")
-        self.notifier.notify_bot_status('paused', 'Pausa manuale')
+        if self.notifier:
+            if self.notifier:
+                self.notifier.notify_bot_status('paused', 'Pausa manuale')
 
     def resume(self):
         """Riprende il bot dalla pausa."""
@@ -278,7 +284,10 @@ class TradingEngine:
         Esegue un ciclo completo di analisi e trading.
 
         Fasi:
-        1. Verifica orari operativi
+        1. Verifica orari operativi"""
+        logger.info("=== CICLO TRADING INIZIATO ===" )
+
+        """
         2. Verifica condizioni macro
         3. Monitora posizioni aperte
         4. Seleziona migliori asset
@@ -289,6 +298,7 @@ class TradingEngine:
         # --- FASE 1: Verifica chiusura forzata ---
         force_close_time = self.config['trading'].get('force_close_time', '21:45')
         if self.risk_manager.should_force_close(force_close_time):
+            logger.info("FASE 1: Chiusura forzata - ciclo saltato")
             open_trades = self.db.get_open_trades()
             if open_trades:
                 logger.info("Chiusura forzata posizioni per fine giornata")
@@ -307,12 +317,14 @@ class TradingEngine:
                 self._daily_starting_capital
             )
             if not daily_check['can_trade']:
+                logger.warning(f"FASE 3: Daily limits raggiunto - {daily_check.get('reason', '')}")
                 if 'Perdita' in daily_check.get('reason', ''):
-                    logger.warning(f"Stop trading: {daily_check['reason']}")
-                    self.notifier.notify_daily_drawdown(
-                        abs(daily_check.get('daily_pnl_pct', 0)),
-                        current_capital
-                    )
+                    if self.notifier:
+                        if self.notifier:
+                            self.notifier.notify_daily_drawdown(
+                            abs(daily_check.get('daily_pnl_pct', 0)),
+                            current_capital
+                        )
                     self.paused = True
                 return
 
@@ -347,7 +359,7 @@ class TradingEngine:
 
         # --- FASE 6: Contesto macro ---
         if self.market_context.should_stop_trading():
-            logger.warning("Condizioni macro avverse - stop nuovi acquisti")
+            logger.warning("FASE 6: Condizioni macro avverse - stop nuovi acquisti")
             return
 
         macro_multiplier = self.market_context.get_size_multiplier()
@@ -424,7 +436,7 @@ class TradingEngine:
         scored_assets.sort(key=lambda x: x[1], reverse=True)
 
         selected = [s[0] for s in scored_assets[:max_assets]]
-        logger.debug(f"Asset selezionati: {selected}")
+        logger.info(f"Asset selezionati: {selected}")
         return selected
 
     def _calculate_asset_score(self, symbol: str) -> float:
@@ -759,7 +771,8 @@ class TradingEngine:
             })
 
             # Notifica Telegram
-            self.notifier.notify_trade_open({
+            if self.notifier:
+                self.notifier.notify_trade_open({
                 'symbol': symbol,
                 'side': 'buy',
                 'entry_price': order.get('filled_price') or price,
@@ -806,7 +819,8 @@ class TradingEngine:
                 if self.risk_manager.should_close_by_timeout(trade):
                     logger.warning(f"[{symbol}] TIMEOUT posizione (> 15 min)")
                     self._close_position(symbol, trade, "Timeout scalping (15min)")
-                    self.notifier.notify_timeout_close(trade, current_price)
+                    if self.notifier:
+                        self.notifier.notify_timeout_close(trade, current_price)
                     continue
 
                 # Verifica stop loss
@@ -814,7 +828,8 @@ class TradingEngine:
                     pnl = (current_price - trade['entry_price']) * trade['quantity']
                     logger.warning(f"[{symbol}] STOP LOSS scattato a ${current_price:.2f}")
                     self._close_position(symbol, trade, "Stop loss")
-                    self.notifier.notify_stop_loss(symbol, current_price, pnl)
+                    if self.notifier:
+                        self.notifier.notify_stop_loss(symbol, current_price, pnl)
                     # SCALPING: Avvia cooldown di 2 minuti dopo lo stop loss
                     self.risk_manager.set_stop_loss_cooldown()
                     continue
@@ -869,7 +884,8 @@ class TradingEngine:
             self._save_virtual_capital()
 
             # Notifica Telegram
-            self.notifier.notify_trade_close(trade_data, reason)
+            if self.notifier:
+                self.notifier.notify_trade_close(trade_data, reason)
 
             logger.info(
                 f"[{symbol}] Posizione chiusa: PnL={pnl:+.2f}$ ({pnl_pct:+.2%}) | {reason} | "
@@ -988,7 +1004,8 @@ class TradingEngine:
                 days_target = self.config.get('paper_trading', {}).get('days_for_live_suggestion', 30)
                 if (self._profitable_days >= days_target and
                         self.config.get('paper_trading', {}).get('notify_live_ready', True)):
-                    self.notifier.notify_live_trading_ready(self._profitable_days)
+                    if self.notifier:
+                        self.notifier.notify_live_trading_ready(self._profitable_days)
 
         logger.info(f"Nuovo starting capital giornaliero: ${self._daily_starting_capital:.2f}")
 
@@ -1017,7 +1034,8 @@ class TradingEngine:
             'mode': self.config['trading']['mode']
         })
 
-        self.notifier.send_daily_report(report_data)
+        if self.notifier:
+            self.notifier.send_daily_report(report_data)
 
     def _send_weekly_report(self):
         """Invia il report settimanale via Telegram."""
@@ -1044,10 +1062,12 @@ class TradingEngine:
             'paused_next_week': weekly_check.get('should_pause', False)
         }
 
-        self.notifier.send_weekly_report(report_data)
+        if self.notifier:
+            self.notifier.send_weekly_report(report_data)
 
         if weekly_check.get('should_pause'):
-            self.notifier.notify_bot_status(
+            if self.notifier:
+                self.notifier.notify_bot_status(
                 'paused',
                 f"Perdite settimanali eccessive: {weekly_pnl_pct:.2%}"
             )
