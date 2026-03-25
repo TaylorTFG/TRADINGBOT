@@ -223,9 +223,11 @@ def page_overview():
                 created = trade.get('created_at')
                 if created:
                     created_dt = datetime.fromisoformat(created)
-                    now = datetime.now(IT_TZ) if created_dt.tzinfo else datetime.now()
+                    # Assicura che created_dt sia aware (con timezone)
                     if created_dt.tzinfo is None:
                         created_dt = created_dt.replace(tzinfo=IT_TZ)
+                    # Ora crea now con lo stesso timezone
+                    now = datetime.now(IT_TZ)
                     duration = (now - created_dt).total_seconds()
                     duration_str = format_duration(duration)
                     timeout_warning = duration > 15*60  # 15 min
