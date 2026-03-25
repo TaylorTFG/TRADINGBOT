@@ -57,6 +57,7 @@ class DatabaseManager:
                     pnl REAL,
                     pnl_pct REAL,
                     strategy TEXT,
+                    entry_reason TEXT,
                     exit_reason TEXT,
                     stop_loss REAL,
                     take_profit REAL,
@@ -149,9 +150,9 @@ class DatabaseManager:
             cursor = conn.execute("""
                 INSERT INTO trades (
                     symbol, side, quantity, entry_price, entry_time,
-                    strategy, stop_loss, take_profit, status,
+                    strategy, entry_reason, stop_loss, take_profit, status,
                     alpaca_order_id, ml_confidence, vote_score
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 trade_data['symbol'],
                 trade_data['side'],
@@ -159,6 +160,7 @@ class DatabaseManager:
                 trade_data['entry_price'],
                 trade_data.get('entry_time', datetime.now().isoformat()),
                 trade_data.get('strategy', 'unknown'),
+                trade_data.get('entry_reason', 'No reason provided'),
                 trade_data.get('stop_loss'),
                 trade_data.get('take_profit'),
                 'open',

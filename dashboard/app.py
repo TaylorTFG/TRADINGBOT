@@ -616,12 +616,14 @@ def main():
 
         page = st.radio(
             "Navigation",
-            ["📊 Overview", "⚙️ Configuration", "📈 Performance 6H", "🎯 Advanced Metrics"],
+            ["📊 Overview", "📋 Trade History", "⚙️ Configuration", "📈 Performance 6H", "🎯 Advanced Metrics"],
             key="page_nav"
         )
 
     if page == "📊 Overview":
         page_overview()
+    elif page == "📋 Trade History":
+        page_trades()
     elif page == "⚙️ Configuration":
         page_config()
     elif page == "📈 Performance 6H":
@@ -643,6 +645,139 @@ def main():
             }}, {refresh_interval * 1000});
         </script>
         """, unsafe_allow_html=True)
+
+
+def page_trades():
+    """Pagina Trade History - mostra tutte le operazioni effettuate."""
+    st.header("📋 Trade History & Live Positions")
+
+    db = get_database()
+    if not db:
+        st.error("Database non trovato")
+        return
+
+    # ---- SEZIONE 1: POSIZIONI APERTE ----
+    st.subheader("🔴 Posizioni Aperte")
+
+    try:
+        open_trades = db.get_open_trades()
+
+        if not open_trades:
+            st.info("Nessuna posizione aperta al momento")
+        else:
+            for trade in open_trades:
+                with st.container(border=True):
+                    col1, col2, col3, col4 = st.columns(4)
+
+                    symbol = trade.get('symbol', 'N/A')
+                    side = trade.get('side', 'BUY').upper()
+                    entry_price = trade.get('entry_price', 0)
+                    qty = trade.get('quantity', 0)
+
+                    with col1:
+                        st.metric("Symbol", symbol)
+                    with col2:
+                        st.metric("Side", side)
+                    with col3:
+                        st.metric("Entry Price", f"${entry_price:.2f}")
+                    with col4:
+                        st.metric("QTY", f"{qty:.4f}")
+
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.write(f"**Entry Time:** {trade.get('entry_time', 'N/A')}")
+                    with col2:
+                        st.write(f"**Reason:** {trade.get('entry_reason', 'N/A')}")
+
+    except Exception as e:
+        st.error(f"Errore caricamento posizioni: {e}")
+
+    st.divider()
+
+    # ---- SEZIONE 2: STORICO TRADE ----
+    st.subheader("📊 Storico Trade")
+
+    try:
+        all_trades = db.get_trade_history(limit=100)
+
+        if not all_trades:
+            st.info("Nessun trade nel database")
+        else:
+            # Prepara dataframe per visualizzazione
+            trades_data = []
+            for trade in all_trades:
+                side = trade.get('side', 'BUY').upper()
+                entry_price = trade.get('entry_price', 0)
+                exit_price = trade.get('exit_price') or 'OPEN'
+                pnl = trade.get('pnl', 0)
+                pnl_pct = trade.get('pnl_pct', 0)
+                status = trade.get('status', 'unknown').upper()
+
+                # Calcola se è profit o loss
+                if status == 'CLOSED':
+                    pnl_color = "🟢" if pnl >= 0 else "🔴"
+                    pnl_str = f"{pnl_color} ${pnl:+.2f} ({pnl_pct*100:+.2f}%)"
+                else:
+                    pnl_str = "🔵 OPEN"
+
+                trades_data.append({
+                    'Symbol': trade.get('symbol', 'N/A'),
+                    'Side': side,
+                    'Entry': f"${entry_price:.2f}",
+                    'Exit': f"${exit_price:.2f}" if isinstance(exit_price, float) else exit_price,
+                    'Qty': f"{trade.get('quantity', 0):.4f}",
+                    'P&L': pnl_str,
+                    'Entry Time': trade.get('entry_time', 'N/A')[:19],
+                    'Exit Time': trade.get('exit_time', '-')[:19] if trade.get('exit_time') else '-',
+                    'Entry Reason': trade.get('entry_reason', 'N/A')[:50],
+                    'Exit Reason': trade.get('exit_reason', '-')[:50] if trade.get('exit_reason') else '-',
+                    'Strategy': trade.get('strategy', 'N/A'),
+                    'Status': status,
+                })
+
+            df_trades = pd.DataFrame(trades_data)
+
+            # Mostri con colori
+            st.dataframe(
+                df_trades,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "P&L": st.column_config.TextColumn(width="medium"),
+                    "Entry Reason": st.column_config.TextColumn(width="medium"),
+                    "Exit Reason": st.column_config.TextColumn(width="medium"),
+                }
+            )
+
+            # Statistiche
+            st.divider()
+            st.subheader("📈 Statistiche Sessione")
+
+            closed_trades = [t for t in all_trades if t.get('status') == 'closed']
+            if closed_trades:
+                wins = len([t for t in closed_trades if t.get('pnl', 0) > 0])
+                losses = len([t for t in closed_trades if t.get('pnl', 0) <= 0])
+                total_pnl = sum(t.get('pnl', 0) for t in closed_trades)
+                avg_pnl = total_pnl / len(closed_trades) if closed_trades else 0
+                win_rate = (wins / len(closed_trades) * 100) if closed_trades else 0
+
+                col1, col2, col3, col4, col5 = st.columns(5)
+
+                with col1:
+                    st.metric("Trade Chiusi", len(closed_trades))
+                with col2:
+                    st.metric("Vincenti", wins, f"{win_rate:.1f}%")
+                with col3:
+                    st.metric("Perdenti", losses)
+                with col4:
+                    st.metric("Total P&L", f"${total_pnl:+.2f}")
+                with col5:
+                    st.metric("Avg P&L", f"${avg_pnl:+.2f}")
+            else:
+                st.info("Nessun trade chiuso ancora")
+
+    except Exception as e:
+        st.error(f"Errore caricamento storico: {e}")
 
 
 if __name__ == "__main__":

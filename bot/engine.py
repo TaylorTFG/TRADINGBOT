@@ -722,12 +722,14 @@ class TradingEngine:
             strategy_name = f"meta_{vote_result['buy_votes']}v_{vote_result.get('strategy_name', 'multi')}"
 
             # Registra nel database
+            entry_reason = f"MetaStrategy: {vote_result.get('reason', 'Consensus reached')}"
             trade_id = self.db.insert_trade({
                 'symbol': symbol,
                 'side': 'buy',
                 'quantity': qty,
                 'entry_price': order.get('filled_price') or price,
                 'strategy': strategy_name,
+                'entry_reason': entry_reason,
                 'stop_loss': stop_loss,
                 'take_profit': take_profit,
                 'alpaca_order_id': order.get('order_id'),
