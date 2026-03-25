@@ -321,7 +321,7 @@ class TradingEngine:
         best_assets_temp = self._select_best_assets()
         if best_assets_temp:
             try:
-                df_1min = self.broker.get_bars(best_assets_temp[0], '1m', limit=50)
+                df_1min = self.broker.get_recent_bars(best_assets_temp[0], '1m', 50)
                 regime_info = self.regime_detector.detect_regime(df_1min)
                 self._current_regime = regime_info
 
