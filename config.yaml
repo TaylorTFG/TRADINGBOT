@@ -52,10 +52,21 @@ assets:
     enabled: false
     symbols: ["SPY", "QQQ", "IWM", "XLK", "XLV", "XLF", "GLD"]
 
-  # Priorità 2: Azioni ad alta liquidità (blue-chip + growth)
+  # Priorità 2: Azioni ad alta liquidità (blue-chip + growth) - 10 STOCKS
   stocks:
-    enabled: false
-    symbols: ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "GOOGL", "META", "NFLX", "AMD", "INTC"]
+    enabled: true
+    symbols: [
+      "NVDA",     # NVIDIA - AI boom, altissima volatilità, volume eccezionale
+      "TSLA",     # Tesla - alta volatilità, spread basso
+      "AAPL",     # Apple - blue chip, volume massimo
+      "AMD",      # AMD - semiconduttori, alta volatilità
+      "META",     # Meta - tech growth, buon volume
+      "AMZN",     # Amazon - blue chip, volume altissimo
+      "MSFT",     # Microsoft - blue chip, volume massimo
+      "QQQ",      # Nasdaq-100 ETF - trend tech, volume eccezionale
+      "TQQQ",     # 3x Nasdaq ETF - volatilità 3x, per swing
+      "SPY"       # S&P 500 ETF - benchmark, volume massimo
+    ]
 
   # Priorità 3: Crypto (24/7, alta volatilità, trend forti)
   # TOP 9 per volume, spread basso, liquidity alta su Alpaca
@@ -74,8 +85,13 @@ assets:
     ]
 
   # Numero massimo di asset da analizzare contemporaneamente
-  # SCALPING: analizziamo 9 crypto H24 (solo quelle disponibili su Alpaca)
-  max_assets_per_cycle: 9
+  # UPGRADE: 19 asset totali (9 crypto + 10 stocks) competono per 4 slot
+  # Il bot seleziona i 4 con i migliori segnali in base al voting system
+  max_assets_per_cycle: 19
+
+  # Chiusura forzata posizioni azionarie 2 minuti prima chiusura mercato USA
+  # 21:58 IT = 16:00 USA (chiusura ufficiale 16:00 EST)
+  force_close_time: "21:58"
 
 # ------------------------------------------------------------
 # FINESTRE ORARIE OPERATIVE (ora italiana)
@@ -83,11 +99,18 @@ assets:
 # ------------------------------------------------------------
 trading_hours:
   windows:
+    # Crypto H24: sempre aperto
     - start: "00:01"
       end: "23:59"
-      description: "H24 Crypto Scalping"
+      description: "Crypto H24 Scalping"
 
-  # Nessuna pausa per crypto 24/7
+    # Azioni: solo orario mercato USA
+    # 15:30 - 22:00 Italia = 09:30 - 16:00 USA (orario ufficiale)
+    - start: "15:30"
+      end: "22:00"
+      description: "US Stock Market Hours (09:30-16:00 EST)"
+
+  # Nessuna pausa speciale (crypto H24)
   avoid: []
 
 # ------------------------------------------------------------

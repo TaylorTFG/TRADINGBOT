@@ -419,6 +419,26 @@ class TradingEngine:
     # ANALISI E TRADING
     # ----------------------------------------------------------------
 
+    def _can_trade_asset(self, symbol: str) -> bool:
+        """
+        Verifica se possiamo operare su un asset specifico in base agli orari.
+        - Crypto (/): H24 sempre
+        - Stock (no /): Solo 15:30-22:00 IT (09:30-16:00 USA)
+
+        Returns:
+            True se possiamo operare, False altrimenti
+        """
+        is_crypto = '/' in symbol
+        if is_crypto:
+            return True  # Crypto H24
+
+        # Stock: verifica orari
+        now = datetime.now(ZoneInfo("Europe/Rome"))
+        current_time = now.time()
+        start = datetime.strptime("15:30", '%H:%M').time()
+        end = datetime.strptime("22:00", '%H:%M').time()
+        return start <= current_time <= end
+
     def _analyze_and_trade(
         self,
         symbol: str,
@@ -435,6 +455,10 @@ class TradingEngine:
             macro_multiplier: Moltiplicatore size per contesto macro
             open_trades: Lista posizioni già aperte
         """
+        # Verifica orari operativi (differenziato crypto vs stock)
+        if not self._can_trade_asset(symbol):
+            return
+
         # Verifica se possiamo aprire una nuova posizione
         pos_check = self.risk_manager.can_open_position(symbol, open_trades)
         if not pos_check['can_open']:
