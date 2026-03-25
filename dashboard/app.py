@@ -163,41 +163,43 @@ def page_overview():
         st.metric(emoji + " Bot Status", text)
 
     with col2:
-        capital = vc_data.get('virtual_capital', 0)
-        st.metric("💰 Capital (USD)", f"${capital:.2f}")
+        capital = vc_data.get('virtual_capital') or 0
+        capital_eur = config.get('trading', {}).get('capital_eur', 2500)
+        st.metric("💰 Capital", f"€{capital_eur} = ${capital:.2f} USD")
 
     with col3:
-        pnl = vc_data.get('total_pnl', 0)
-        pnl_pct = vc_data.get('total_pnl_pct', 0) * 100
+        pnl = vc_data.get('total_pnl') or 0
+        pnl_pct = (vc_data.get('total_pnl_pct') or 0) * 100
         delta = f"{pnl:+.2f}$ ({pnl_pct:+.2f}%)"
         st.metric("📊 Total P&L", delta)
 
     with col4:
         daily_stats = get_today_stats(db)
-        st.metric("📈 Today P&L", f"{daily_stats.get('total_pnl', 0):+.2f}$")
+        daily_pnl = daily_stats.get('total_pnl') or 0
+        st.metric("📈 Today P&L", f"{daily_pnl:+.2f}$")
 
     # ---- ROW 2: Trade Counters ----
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        trades_today = today_stats.get('total_trades', 0)
+        trades_today = today_stats.get('total_trades') or 0
         max_trades = config.get('risk_management', {}).get('daily', {}).get('max_trades', 50)
         pct = (trades_today / max_trades * 100) if max_trades > 0 else 0
         st.metric("📊 Trades Today", f"{trades_today}/{max_trades}",
                  delta=f"{pct:.0f}%")
 
     with col2:
-        winning = today_stats.get('winning', 0)
-        losing = today_stats.get('losing', 0)
+        winning = today_stats.get('winning') or 0
+        losing = today_stats.get('losing') or 0
         wr = (winning / (winning + losing) * 100) if (winning + losing) > 0 else 0
         st.metric("✅ Win Rate", f"{wr:.1f}%", delta=f"{winning}W/{losing}L")
 
     with col3:
-        avg_win = today_stats.get('avg_win', 0)
+        avg_win = today_stats.get('avg_win') or 0
         st.metric("💚 Avg Win", f"${avg_win:.2f}")
 
     with col4:
-        avg_loss = today_stats.get('avg_loss', 0)
+        avg_loss = today_stats.get('avg_loss') or 0
         st.metric("💔 Avg Loss", f"${avg_loss:.2f}")
 
     # ---- ROW 3: Open Positions ----
@@ -259,7 +261,7 @@ def page_overview():
     st.subheader("🎯 Ultimi Trade (Ultimi 10)")
 
     if db:
-        closed_trades = db.query("SELECT * FROM trades WHERE closed_at IS NOT NULL ORDER BY closed_at DESC LIMIT 10")
+        closed_trades = db.get_trade_history(limit=10)
         if closed_trades:
             df_trades = pd.DataFrame(closed_trades)
             df_display = pd.DataFrame({
@@ -301,52 +303,68 @@ def page_config():
     with col2:
         st.subheader("🛡️ Risk Management")
         rm = config.get('risk_management', {})
+        st.write(f"**R/R Ratio**: 1:2")
         st.write(f"**Stop Loss**: {rm.get('stop_loss_pct', 0)*100:.1f}%")
-        st.write(f"**Take Profit**: {rm.get('take_profit_pct', 0)*100:.1f}%")
+        st.write(f"**Take Profit**: {rm.get('take_profit_pct', 0)*100:.1f}% (R/R 1:2)")
+        break_even = rm.get('break_even', {})
+        if break_even.get('enabled'):
+            st.write(f"**Break-Even**: +{break_even.get('activation_pct', 0)*100:.1f}%")
         trailing = rm.get('trailing_stop', {})
-        st.write(f"**Trailing**: activation {trailing.get('activation_pct', 0)*100:.1f}%, distance {trailing.get('trail_pct', 0)*100:.2f}%")
+        st.write(f"**Trailing**: +{trailing.get('activation_pct', 0)*100:.1f}% activation, {trailing.get('trail_pct', 0)*100:.2f}% distance")
 
     col1, col2 = st.columns(2)
 
     with col1:
         st.subheader("📈 Limiti Giornalieri")
         daily = rm.get('daily', {})
-        st.write(f"**Max Loss**: {daily.get('max_loss_pct', 0)*100:.1f}%")
-        st.write(f"**Target Profit**: {daily.get('target_profit_pct', 0)*100:.1f}%")
-        st.write(f"**Max Trade/Day**: {daily.get('max_trades', 50)}")
+        st.write(f"**Max Loss**: {daily.get('max_loss_pct', 0)*100:.1f}% (€{config.get('trading', {}).get('capital_eur', 2500) * daily.get('max_loss_pct', 0):.0f})")
+        st.write(f"**Target Profit**: {daily.get('target_profit_pct', 0)*100:.1f}% (€{config.get('trading', {}).get('capital_eur', 2500) * daily.get('target_profit_pct', 0):.0f})")
+        st.write(f"**Max Trade/Day**: {daily.get('max_trades', 80)}")
 
     with col2:
         st.subheader("🛑 Quality Filters")
         quality = rm.get('quality_filters', {})
         st.write(f"**Max Position Duration**: {quality.get('max_position_duration_min', 15)} min")
         st.write(f"**Cooldown Post-SL**: {quality.get('cooldown_after_loss_sec', 120)}s")
-        st.write(f"**Max Open Positions**: {config.get('trading', {}).get('max_open_positions', 2)}")
+        st.write(f"**Max Spread**: {quality.get('max_spread_pct', 0.0005)*100:.3f}%")
+        st.write(f"**Max Open Positions**: {config.get('trading', {}).get('max_open_positions', 4)} (25% per pos)")
 
     # Strategie
-    st.subheader("🎯 Strategie (1min)")
+    st.subheader("🎯 Strategie (1min) - 4 Strategie con Sistema di Voto")
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        st.write("**EMA Crossover**")
+        st.write("**Strategy 1: EMA Crossover**")
         ema = config.get('strategy_confluence', {}).get('ema', {})
         st.write(f"EMA {ema.get('fast_period', 5)} × {ema.get('slow_period', 13)}")
         rsi = config.get('strategy_confluence', {}).get('rsi', {})
         st.write(f"RSI {rsi.get('period', 7)} ({rsi.get('oversold', 35)}/{rsi.get('overbought', 65)})")
 
     with col2:
-        st.write("**Bollinger Squeeze**")
+        st.write("**Strategy 2: Bollinger Squeeze**")
         bb = config.get('strategy_breakout', {}).get('bollinger', {})
         st.write(f"BB {bb.get('period', 20)}, σ {bb.get('std_dev', 2)}")
         squeeze = config.get('strategy_breakout', {}).get('squeeze', {})
         st.write(f"Squeeze: {squeeze.get('bandwidth_threshold', 0.005)*100:.2f}%")
 
     with col3:
-        st.write("**VWAP Momentum**")
+        st.write("**Strategy 3: VWAP Momentum**")
         vwap = config.get('strategy_sentiment', {}).get('vwap', {})
         st.write(f"Proximity: {vwap.get('price_proximity_pct', 0.003)*100:.2f}%")
         macd = config.get('strategy_sentiment', {}).get('macd', {})
         st.write(f"MACD {macd.get('fast_period', 5)},{macd.get('slow_period', 13)},{macd.get('signal_period', 5)}")
+
+    with col4:
+        st.write("**Strategy 4: Liquidity Hunt** ⭐")
+        liq = config.get('strategy_liquidity', {})
+        st.write(f"Lookback: {liq.get('lookback_mins', 60)} min")
+        st.write(f"MFI({liq.get('mfi_period', 9)}) > {liq.get('mfi_buy_threshold', 40)}")
+        st.write(f"Sweep: {liq.get('sweep_confirmation_distance', 0.0015)*100:.2f}%")
+
+    # Voting system
+    st.markdown("---")
+    st.write("**Voting System**: 3/4 or 4/4 concordi → 25% size | 2/4 concordi → 12.5% size | <2 → HOLD")
 
 
 # ============================================================
@@ -369,12 +387,15 @@ def page_performance():
     now = datetime.now(IT_TZ)
     six_hours_ago = now - timedelta(hours=6)
 
-    trades = db.query("""
-        SELECT * FROM trades
-        WHERE closed_at IS NOT NULL
-        AND datetime(closed_at) >= datetime(?)
-        ORDER BY closed_at DESC
-    """, (six_hours_ago.isoformat(),))
+    # Get trades from last 6 hours
+    trades = db.get_trade_history(
+        start_date=six_hours_ago.strftime('%Y-%m-%d'),
+        limit=1000
+    ) if db else []
+
+    # Filter for last 6 hours (in case trades span multiple days)
+    trades = [t for t in trades if t.get('entry_time') and
+              datetime.fromisoformat(t['entry_time']).replace(tzinfo=IT_TZ) >= six_hours_ago]
 
     if not trades:
         st.info("Nessun trade negli ultimi 6 ore")
