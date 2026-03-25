@@ -275,6 +275,101 @@ class BrokerClient:
             logger.error(f"Errore ordine mercato {symbol} {side} {qty}: {e}")
             return None
 
+    def place_limit_order(
+        self,
+        symbol: str,
+        qty: float,
+        side: str,
+        limit_price: float
+    ) -> Optional[Dict]:
+        """
+        Piazza un ordine limit (Maker) per ridurre commissioni.
+
+        Args:
+            symbol: Simbolo dell'asset (es. 'BTC/USD')
+            qty: Quantità da acquistare/vendere
+            side: 'buy' o 'sell'
+            limit_price: Prezzo limite
+
+        Returns:
+            Dizionario con i dettagli dell'ordine o None in caso di errore
+        """
+        try:
+            # Normalizza il simbolo (rimuove '/' per crypto)
+            alpaca_symbol = symbol.replace('/', '')
+
+            order_side = OrderSide.BUY if side.lower() == 'buy' else OrderSide.SELL
+
+            order_request = LimitOrderRequest(
+                symbol=alpaca_symbol,
+                qty=qty,
+                side=order_side,
+                time_in_force=TimeInForce.DAY,
+                limit_price=limit_price,
+            )
+
+            order = self._retry_on_error(
+                self.trading_client.submit_order,
+                order_request
+            )
+
+            logger.info(f"Ordine limit piazzato: {symbol} {side} {qty} @ {limit_price} | ID: {order.id}")
+
+            return {
+                'order_id': str(order.id),
+                'symbol': symbol,
+                'side': side,
+                'qty': qty,
+                'limit_price': limit_price,
+                'status': order.status.value,
+                'created_at': str(order.created_at),
+            }
+
+        except Exception as e:
+            logger.error(f"Errore ordine limit {symbol} {side} {qty} @ {limit_price}: {e}")
+            return None
+
+    def get_order_status(self, order_id: str) -> Optional[str]:
+        """
+        Recupera lo stato di un ordine specifico.
+
+        Args:
+            order_id: ID dell'ordine
+
+        Returns:
+            Stato dell'ordine ('FILLED', 'PENDING', 'CANCELED', ecc.) o None se errore
+        """
+        try:
+            order = self._retry_on_error(
+                self.trading_client.get_order_by_id,
+                order_id
+            )
+            return order.status.value if order else None
+        except Exception as e:
+            logger.warning(f"Errore recupero stato ordine {order_id}: {e}")
+            return None
+
+    def cancel_order(self, order_id: str) -> bool:
+        """
+        Cancella un ordine specifico.
+
+        Args:
+            order_id: ID dell'ordine da cancellare
+
+        Returns:
+            True se successo, False altrimenti
+        """
+        try:
+            self._retry_on_error(
+                self.trading_client.cancel_order,
+                order_id
+            )
+            logger.info(f"Ordine cancellato: {order_id}")
+            return True
+        except Exception as e:
+            logger.warning(f"Errore cancellazione ordine {order_id}: {e}")
+            return False
+
     def _place_stop_loss_order(self, symbol: str, qty: float, original_side: str, stop_price: float):
         """Piazza un ordine stop loss come ordine separato."""
         try:

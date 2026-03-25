@@ -19,6 +19,7 @@ from bot.market_context import MarketContextAnalyzer
 from bot.strategy_confluence import ConfluenceStrategy
 from bot.strategy_breakout import BreakoutStrategy
 from bot.strategy_sentiment import SentimentStrategy
+from bot.strategy_liquidity import LiquidityHuntStrategy
 from bot.news_analyzer import NewsAnalyzer
 from bot.meta_strategy import MetaStrategy
 from bot.ml_filter import MLFilter
@@ -73,6 +74,9 @@ class TradingEngine:
         self._profitable_days: int = 0
         self._paper_start_date: Optional[datetime] = None
 
+        # Pending Limit Orders per Order Chase (3 candele timeout)
+        self._pending_orders: Dict[str, Dict] = {}  # {order_id: {symbol, qty, side, ...}}
+
         # Inizializza componenti
         self._init_components()
 
@@ -105,6 +109,7 @@ class TradingEngine:
         self.strategy_confluence = ConfluenceStrategy(self.config)
         self.strategy_breakout = BreakoutStrategy(self.config)
         self.strategy_sentiment = SentimentStrategy(self.news_analyzer, self.config)
+        self.strategy_liquidity = LiquidityHuntStrategy(self.config)
 
         # Meta-Strategy (sistema di voto)
         self.meta_strategy = MetaStrategy(self.config)
@@ -438,22 +443,32 @@ class TradingEngine:
             if col_name not in df_with_indicators.columns:
                 df_with_indicators[col_name] = df_5min['close'].ewm(span=period, adjust=False).mean()
 
-        # --- Analisi Strategia 1: Confluence ---
+        # --- Analisi Strategia 1: Confluence (EMA Crossover) ---
         signal_1 = self.strategy_confluence.analyze(df_with_indicators, symbol)
 
-        # --- Analisi Strategia 2: Breakout ---
+        # --- Analisi Strategia 2: Breakout (Bollinger Squeeze) ---
         signal_2 = self.strategy_breakout.analyze(df_5min, df_daily, symbol)
 
-        # --- Analisi Strategia 3: Sentiment ---
+        # --- Analisi Strategia 3: Sentiment (VWAP Momentum) ---
         signal_3 = self.strategy_sentiment.analyze(df_with_indicators, symbol)
 
-        # --- Sistema di Voto Meta-Strategy (con filtro trend 5min) ---
-        vote_result = self.meta_strategy.vote(signal_1, signal_2, signal_3, symbol, df_5min)
+        # --- Analisi Strategia 4: Liquidity Hunt (Sweep Detection + MFI) ---
+        signal_4 = self.strategy_liquidity.analyze(df_with_indicators, df_5min, symbol)
+
+        # --- Sistema di Voto Meta-Strategy (con filtri trend 5min + EMA 200) ---
+        current_price = float(df_5min.iloc[-1]['close']) if df_5min is not None and len(df_5min) > 0 else 0
+        vote_result = self.meta_strategy.vote(
+            signal_1, signal_2, signal_3, signal_4,
+            symbol,
+            df_5min=df_5min,
+            df_daily=df_daily,
+            current_price=current_price
+        )
         final_signal = vote_result['final_signal']
         vote_score = vote_result['vote_score']
 
-        # Salva i segnali nel database
-        for signal, name in [(signal_1, 'confluence'), (signal_2, 'breakout'), (signal_3, 'sentiment')]:
+        # Salva i segnali nel database (4 strategie)
+        for signal, name in [(signal_1, 'confluence'), (signal_2, 'breakout'), (signal_3, 'sentiment'), (signal_4, 'liquidity')]:
             self.db.insert_signal({
                 'symbol': symbol,
                 'strategy': name,

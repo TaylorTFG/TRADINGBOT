@@ -15,18 +15,19 @@ IT_TZ = ZoneInfo("Europe/Rome")
 
 class RiskManager:
     """
-    Risk Manager per SCALPING CRYPTO H24.
+    Risk Manager per SCALPING CRYPTO H24 - SCALATO €2500.
 
-    Parametri ottimizzati:
+    Parametri ottimizzati per €2500 capitale:
     - Stop Loss: 0.5% (strettissimo)
-    - Take Profit: 0.8% (piccoli guadagni frequenti)
-    - Trailing Stop: activation 0.4%, distance 0.25%
+    - Take Profit: 1.0% (ratio 1:2)
+    - Trailing Stop: activation 1.0%, distance 0.3%
+    - Break-Even: activation 0.7% (zero loss guarantee)
     - Position Duration: max 15 minuti (timeout)
     - Cooldown: 2 minuti dopo ogni stop loss
-    - Daily Loss: -3% → stop trading
-    - Daily Target: +2% → riduce size al 50%
-    - Max Trades: 50 per giorno
-    - Max Open: 2 posizioni contemporanee
+    - Daily Loss: -4% → stop trading (€100)
+    - Daily Target: +2.5% → riduce size al 50% (€62.50)
+    - Max Trades: 80 per giorno (aumentato)
+    - Max Open: 4 posizioni contemporanee (25% max per pos)
     """
 
     def __init__(self, config: dict, database):
@@ -35,25 +36,30 @@ class RiskManager:
         self.db = database
         self.risk_config = config.get('risk_management', {})
 
-        # ---- PARAMETRI SCALPING ----
+        # ---- PARAMETRI SCALPING EVOLUTO ----
         self.stop_loss_pct = self.risk_config.get('stop_loss_pct', 0.005)        # -0.5%
-        self.take_profit_pct = self.risk_config.get('take_profit_pct', 0.008)    # +0.8%
-        self.max_risk_per_trade = self.risk_config.get('max_risk_per_trade', 0.02)
+        self.take_profit_pct = self.risk_config.get('take_profit_pct', 0.010)    # +1.0% (era 0.8%)
+        self.max_risk_per_trade = self.risk_config.get('max_risk_per_trade', 0.025)  # 2.5% (scalato)
 
-        # Trailing stop (activation 0.4%, distance 0.25%)
+        # Trailing stop (activation 1.0%, distance 0.3%)
         trailing = self.risk_config.get('trailing_stop', {})
         self.trailing_enabled = trailing.get('enabled', True)
-        self.trailing_activation = trailing.get('activation_pct', 0.004)
-        self.trailing_distance = trailing.get('trail_pct', 0.0025)
+        self.trailing_activation = trailing.get('activation_pct', 0.01)    # Attiva dopo +1% (era 0.4%)
+        self.trailing_distance = trailing.get('trail_pct', 0.003)          # Distance 0.3% (era 0.25%)
+
+        # Break-Even automatico (activation 0.7%)
+        break_even = self.risk_config.get('break_even', {})
+        self.break_even_enabled = break_even.get('enabled', True)
+        self.break_even_activation = break_even.get('activation_pct', 0.007)  # Attiva a +0.7%
 
         # Position limits
         self.max_open_positions = config.get('trading', {}).get('max_open_positions', 2)
 
-        # Daily limits
+        # Daily limits (scalati per €2500)
         daily = self.risk_config.get('daily', {})
-        self.max_daily_loss = daily.get('max_loss_pct', 0.03)        # -3% = $16.35
-        self.daily_profit_target = daily.get('target_profit_pct', 0.02)  # +2% = $10.9
-        self.max_trades_per_day = daily.get('max_trades', 50)
+        self.max_daily_loss = daily.get('max_loss_pct', 0.04)        # -4% = €100 (era -3%)
+        self.daily_profit_target = daily.get('target_profit_pct', 0.025)  # +2.5% = €62.50 (era +2%)
+        self.max_trades_per_day = daily.get('max_trades', 80)        # 80 trade (era 50)
 
         # Weekly limits
         weekly = self.risk_config.get('weekly', {})
@@ -66,10 +72,11 @@ class RiskManager:
         self.cooldown_after_loss_sec = quality.get('cooldown_after_loss_sec', 120)  # 2 min
         self.max_position_duration_min = quality.get('max_position_duration_min', 15)
 
-        # Sizing
+        # Sizing (4 posizioni, 25% max per pos)
         sizing = self.risk_config.get('sizing', {})
-        self.full_agreement_pct = sizing.get('full_agreement_pct', 0.02)
-        self.partial_agreement_pct = sizing.get('partial_agreement_pct', 0.01)
+        self.full_agreement_pct = sizing.get('full_agreement_pct', 0.025)     # 2.5% (era 2%)
+        self.partial_agreement_pct = sizing.get('partial_agreement_pct', 0.0125)  # 1.25% (era 1%)
+        self.max_position_pct = sizing.get('max_position_pct', 0.025)         # Hard limit 2.5%
 
         # Stato interno
         self._paused_until: Optional[datetime] = None
@@ -79,9 +86,12 @@ class RiskManager:
         self._trades_today: int = 0
 
         logger.info(
-            f"Risk Manager (Scalping) inizializzato | "
-            f"SL: {self.stop_loss_pct*100:.1f}%, TP: {self.take_profit_pct*100:.1f}%, "
-            f"Max Daily Loss: {self.max_daily_loss*100:.1f}%, Max Trades: {self.max_trades_per_day}"
+            f"Risk Manager (Scalping H24 €2500) inizializzato | "
+            f"SL: {self.stop_loss_pct*100:.1f}%, TP: {self.take_profit_pct*100:.1f}% (R/R 1:2), "
+            f"Trailing: +{self.trailing_activation*100:.1f}% activation, "
+            f"Break-even: +{self.break_even_activation*100:.1f}%, "
+            f"Max Positions: 4, Max Daily Loss: {self.max_daily_loss*100:.1f}%, "
+            f"Max Trades: {self.max_trades_per_day}"
         )
 
     # ----------------------------------------------------------------

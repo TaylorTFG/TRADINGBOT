@@ -13,13 +13,13 @@ trading:
 
   # Capitale iniziale in EUR (verrà convertito in USD automaticamente)
   # NOTA: Alpaca paper dà $100,000 ma il bot opera SOLO su questo importo
-  capital_eur: 500
+  capital_eur: 2500
 
   # Tasso di cambio EUR/USD usato per la conversione
   eur_usd_rate: 1.09
 
   # Numero massimo di posizioni aperte contemporaneamente
-  max_open_positions: 2
+  max_open_positions: 4
 
   # Chiusura forzata posizioni prima della chiusura mercato (ora IT)
   force_close_time: "23:58"
@@ -58,13 +58,24 @@ assets:
     symbols: ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "GOOGL", "META", "NFLX", "AMD", "INTC"]
 
   # Priorità 3: Crypto (24/7, alta volatilità, trend forti)
+  # TOP 9 per volume, spread basso, liquidity alta su Alpaca
   crypto:
     enabled: true
-    symbols: ["BTC/USD", "ETH/USD", "SOL/USD"]
+    symbols: [
+      "BTC/USD",    # Bitcoin - massimo volume globale
+      "ETH/USD",    # Ethereum - volume eccezionale
+      "SOL/USD",    # Solana - high volatility + spread basso
+      "LDO/USD",    # Lido - volume altissimo, spread stretto
+      "ARB/USD",    # Arbitrum - alta liquidità, spread ottimo
+      "OP/USD",     # Optimism - liquidity forte, spread basso
+      "XRP/USD",    # Ripple - volume eccezionale, spread stretto
+      "DOGE/USD",   # Dogecoin - volatility alta, liquidità buona
+      "AVAX/USD"    # Avalanche - high vol, spread accettabile
+    ]
 
   # Numero massimo di asset da analizzare contemporaneamente
-  # SCALPING: analizziamo solo 3 crypto H24
-  max_assets_per_cycle: 3
+  # SCALPING: analizziamo 9 crypto H24 (solo quelle disponibili su Alpaca)
+  max_assets_per_cycle: 9
 
 # ------------------------------------------------------------
 # FINESTRE ORARIE OPERATIVE (ora italiana)
@@ -138,7 +149,26 @@ strategy_breakout:
   target_type: "dynamic"
 
 # ------------------------------------------------------------
-# STRATEGIA 3: VWAP MOMENTUM SCALPING (1min)
+# STRATEGIA 3b: LIQUIDITY HUNT SCALPING (1min)
+# Identifica Liquidity Sweeps e caccia agli stop
+# Valida con Money Flow Index (MFI) a 9 periodi
+# ------------------------------------------------------------
+strategy_liquidity:
+  enabled: true
+
+  # Lookback per identificare Support/Resistance
+  lookback_mins: 60             # Massimi/minimi ultimi 60 minuti
+
+  # Money Flow Index (MFI) - 9 periodi
+  mfi_period: 9                 # Periodo MFI
+  mfi_buy_threshold: 40         # MFI > 40 per BUY Sweep
+  mfi_sell_threshold: 60        # MFI < 60 per SELL Sweep
+
+  # Distanza di conferma sweep
+  sweep_confirmation_distance: 0.005  # 0.5%
+
+# ------------------------------------------------------------
+# STRATEGIA 4: VWAP MOMENTUM SCALPING (1min)
 # (rimpiazza NEWS SENTIMENT — inutile per crypto scalping)
 # ------------------------------------------------------------
 strategy_sentiment:
@@ -204,19 +234,24 @@ risk_management:
   stop_loss_pct: 0.005          # -0.5%
 
   # Take profit dal prezzo di entrata (SCALPING: piccoli guadagni)
-  take_profit_pct: 0.008        # +0.8% (ratio 1:1.6)
+  take_profit_pct: 0.010        # +1.0% (ratio 1:2)
 
-  # Trailing stop (attivazione a +0.4%, distanza 0.25%)
+  # Trailing stop (attivazione a +1%, distanza 0.3%)
   trailing_stop:
     enabled: true
-    activation_pct: 0.004       # Si attiva quando profitto >= +0.4%
-    trail_pct: 0.0025           # Distanza trailing stop 0.25%
+    activation_pct: 0.01        # Si attiva quando profitto >= +1%
+    trail_pct: 0.003            # Distanza trailing stop 0.3%
 
-  # Limiti giornalieri SCALPING
+  # Break-even automatico (attiva a +0.7% profitto)
+  break_even:
+    enabled: true
+    activation_pct: 0.007       # Si attiva quando profitto >= +0.7%
+
+  # Limiti giornalieri SCALPING (scalati per €2500)
   daily:
-    max_loss_pct: 0.03          # -3% = $16.35 (stop trading)
-    target_profit_pct: 0.02     # +2% = $10.9 (continua, riduci size 50%)
-    max_trades: 50              # Max 50 trade al giorno
+    max_loss_pct: 0.04          # -4% = €100 (stop trading)
+    target_profit_pct: 0.025    # +2.5% = €62.50 (continua, riduci size 50%)
+    max_trades: 80              # Max 80 trade al giorno (aumentato)
 
   # Limiti settimanali
   weekly:
@@ -225,15 +260,17 @@ risk_management:
 
   # Filtro qualità segnale SCALPING
   quality_filters:
-    max_spread_pct: 0.001       # Skip se spread > 0.1%
+    max_spread_pct: 0.0005      # Skip se spread > 0.05% (più stringente)
+    min_volume_ratio: 1.3       # Skip se volume < 130% della media
     cooldown_after_loss_sec: 120  # 2 minuti dopo SL
     max_position_duration_min: 15  # Timeout posizione a 15 min
 
-  # Position sizing
+  # Position sizing (4 posizioni max, 25% per posizione)
   sizing:
     # Peso per sistema di voto
-    full_agreement_pct: 0.02    # 3/3 concordi → 2% capitale
-    partial_agreement_pct: 0.01 # 2/3 concordi → 1% capitale
+    full_agreement_pct: 0.025    # 3/3 concordi → 2.5% capitale (€625 su €2500)
+    partial_agreement_pct: 0.0125 # 2/3 concordi → 1.25% capitale (€312.5)
+    max_position_pct: 0.025      # Max 2.5% per singola posizione (hard limit)
 
 # ------------------------------------------------------------
 # CONTESTO MACRO (filtri di mercato)
