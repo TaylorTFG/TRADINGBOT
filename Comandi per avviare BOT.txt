@@ -1,0 +1,17 @@
+Terminal 1 - Avvia il Bot:
+  cd E:\TRADING BOT
+  .\venv\Scripts\Activate.ps1
+  python main.py bot
+
+  Terminal 2 - Avvia la Dashboard:
+  cd E:\TRADING BOT
+  .\venv\Scripts\Activate.ps1
+  python main.py dashboard
+
+  La dashboard si apre automaticamente a http://localhost:8501
+
+  ---
+  Altri comandi utili:
+  python main.py status              # Mostra stato e performance
+  python main.py backtest            # Esegui backtesting
+  python main.py backtest --symbols BTC/USD,ETH/USD  # Backtest specifici

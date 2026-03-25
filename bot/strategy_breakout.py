@@ -82,31 +82,31 @@ class BreakoutStrategy:
                     window=self.bb_period,
                     window_dev=self.bb_std
                 )
-                df['bb_upper'] = bb.bollinger_hband()
-                df['bb_lower'] = bb.bollinger_lband()
-                df['bb_middle'] = bb.bollinger_mavg()
+                df.loc[:, 'bb_upper'] = bb.bollinger_hband()
+                df.loc[:, 'bb_lower'] = bb.bollinger_lband()
+                df.loc[:, 'bb_middle'] = bb.bollinger_mavg()
             else:
                 # Bollinger Bands manuale
-                df['bb_middle'] = close.rolling(window=self.bb_period).mean()
+                df.loc[:, 'bb_middle'] = close.rolling(window=self.bb_period).mean()
                 std = close.rolling(window=self.bb_period).std()
-                df['bb_upper'] = df['bb_middle'] + (std * self.bb_std)
-                df['bb_lower'] = df['bb_middle'] - (std * self.bb_std)
+                df.loc[:, 'bb_upper'] = df['bb_middle'] + (std * self.bb_std)
+                df.loc[:, 'bb_lower'] = df['bb_middle'] - (std * self.bb_std)
 
             # Calcola bandwidth (larghezza della banda)
-            df['bb_width'] = df['bb_upper'] - df['bb_lower']
-            df['bb_middle_safe'] = df['bb_middle'].replace(0, 1)
-            df['bandwidth_pct'] = df['bb_width'] / df['bb_middle_safe']
+            df.loc[:, 'bb_width'] = df['bb_upper'] - df['bb_lower']
+            df.loc[:, 'bb_middle_safe'] = df['bb_middle'].replace(0, 1)
+            df.loc[:, 'bandwidth_pct'] = df['bb_width'] / df['bb_middle_safe']
 
             # RSI per mean reversion
             delta = close.diff()
             gain = (delta.where(delta > 0, 0)).rolling(window=7).mean()
             loss = (-delta.where(delta < 0, 0)).rolling(window=7).mean()
             rs = gain / loss.replace(0, np.finfo(float).eps)
-            df['rsi'] = 100 - (100 / (1 + rs))
+            df.loc[:, 'rsi'] = 100 - (100 / (1 + rs))
 
             # Volume ratio
-            df['volume_ma'] = df['volume'].rolling(window=10).mean()
-            df['volume_ratio'] = df['volume'] / df['volume_ma'].replace(0, 1)
+            df.loc[:, 'volume_ma'] = df['volume'].rolling(window=10).mean()
+            df.loc[:, 'volume_ratio'] = df['volume'] / df['volume_ma'].replace(0, 1)
 
             return df
 

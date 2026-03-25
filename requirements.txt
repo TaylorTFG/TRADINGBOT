@@ -2,19 +2,16 @@
 
 # Core
 python-dotenv==1.0.0
-pyyaml==6.0.1
+PyYAML==6.0.1
 
 # Broker & API
-alpaca-trade-api==3.2.0
+alpaca-py>=0.40.0
 requests==2.31.0
 
 # Data & Analysis
-pandas==2.1.4
-numpy==1.24.3
+numpy==1.26.4
+pandas==2.2.0
 ta==0.10.2
-
-# Technical Analysis
-pandas-ta==0.3.14b0
 
 # Sentiment & NLP
 vaderSentiment==3.3.2
@@ -24,12 +21,10 @@ nltk==3.8.1
 python-telegram-bot==20.3
 
 # Dashboard
-streamlit==1.28.1
-plotly==5.18.0
+streamlit>=1.40.0
+plotly>=5.18.0
 
 # Utilities
 APScheduler==3.10.4
-
-# Optional: For data fetching
-feedparser==6.0.10
-beautifulsoup4==4.12.2
+schedule==1.2.0
+pytz==2024.1
