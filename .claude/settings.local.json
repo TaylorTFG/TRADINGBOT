@@ -34,7 +34,8 @@
       "Bash(find \"E:\\\\TRADING BOT/bot\" -name \"*.py\" -type f -exec wc -l {} +)",
       "Bash(python3:*)",
       "Bash(python:*)",
-      "Bash(timeout 10 streamlit run dashboard/app.py --logger.level=error)"
+      "Bash(timeout 10 streamlit run dashboard/app.py --logger.level=error)",
+      "Bash(cd:*)"
     ]
   }
 }

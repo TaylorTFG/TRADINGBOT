@@ -596,6 +596,101 @@ def page_analytics():
             df_strategies = pd.DataFrame(strategy_data)
             st.dataframe(df_strategies, use_container_width=True, hide_index=True)
 
+        # ---- ROW 5: Risk-Adjusted Returns ----
+        st.subheader("📉 Risk-Adjusted Performance")
+        col1, col2, col3, col4 = st.columns(4)
+
+        # Sharpe Ratio (semplificato: assume risk-free rate = 0)
+        import statistics
+        pnls = [t.get('pnl', 0) for t in trades]
+        if len(pnls) > 1:
+            mean_pnl = statistics.mean(pnls)
+            stddev_pnl = statistics.stdev(pnls)
+            sharpe = (mean_pnl / stddev_pnl * (252 ** 0.5)) if stddev_pnl > 0 else 0  # Annualized
+        else:
+            sharpe = 0
+
+        # Max Drawdown
+        cumulative_pnl = 0
+        max_cumulative = 0
+        max_drawdown = 0
+        for t in trades:
+            cumulative_pnl += t.get('pnl', 0)
+            if cumulative_pnl > max_cumulative:
+                max_cumulative = cumulative_pnl
+            drawdown = max_cumulative - cumulative_pnl
+            max_drawdown = max(max_drawdown, drawdown)
+
+        # Profit per trade (ROI approximation)
+        total_capital_at_risk = sum([t.get('quantity', 0) * t.get('entry_price', 0) for t in trades])
+        total_roi = (total_pnl / total_capital_at_risk * 100) if total_capital_at_risk > 0 else 0
+
+        with col1:
+            st.metric("Sharpe Ratio", f"{sharpe:.2f}", delta="Risk-adjusted returns")
+        with col2:
+            st.metric("Max Drawdown", f"${max_drawdown:+.2f}", delta="Peak-to-trough")
+        with col3:
+            st.metric("Total ROI", f"{total_roi:+.2f}%", delta="Return on capital")
+        with col4:
+            st.metric("Total P&L", f"${total_pnl:+.2f}", delta=f"{len(trades)} trades")
+
+        # ---- ROW 6: Kelly & Position Sizing Metrics ----
+        st.subheader("🎲 Kelly Criterion & Sizing")
+        col1, col2, col3 = st.columns(3)
+
+        # Kelly Fraction
+        if len(wins) > 0 and len(losses) > 0:
+            win_rate = len(wins) / len(trades)
+            loss_rate = 1 - win_rate
+            if avg_win > 0:
+                kelly_fraction = (win_rate * avg_win - loss_rate * avg_loss) / avg_win
+                kelly_safe = kelly_fraction * 0.5  # Half-Kelly
+            else:
+                kelly_safe = 0
+        else:
+            kelly_safe = 0
+
+        with col1:
+            st.metric("Kelly Fraction", f"{kelly_safe*100:.2f}%", delta="Optimal sizing")
+        with col2:
+            st.metric("Win Rate", f"{len(wins)/len(trades)*100:.1f}%", delta=f"{len(wins)}W/{len(losses)}L")
+        with col3:
+            st.metric("Risk/Reward Ratio", f"{avg_win/avg_loss:.2f}x" if avg_loss > 0 else "∞", delta="W/L ratio")
+
+        # ---- ROW 7: Consistency Metrics ----
+        st.subheader("📊 Consistency & Reliability")
+        col1, col2, col3 = st.columns(3)
+
+        # Winning days vs losing days
+        daily_pnl = {}
+        for t in trades:
+            date_key = t.get('entry_time', '')[:10]
+            if date_key:
+                daily_pnl[date_key] = daily_pnl.get(date_key, 0) + t.get('pnl', 0)
+
+        winning_days = len([d for d in daily_pnl.values() if d > 0])
+        losing_days = len([d for d in daily_pnl.values() if d <= 0])
+        total_days = len(daily_pnl)
+
+        # Consecutive trades without loss
+        longest_no_loss = 0
+        current_no_loss = 0
+        for t in trades:
+            if t.get('pnl', 0) >= 0:
+                current_no_loss += 1
+                longest_no_loss = max(longest_no_loss, current_no_loss)
+            else:
+                current_no_loss = 0
+
+        with col1:
+            st.metric("Winning Days", f"{winning_days}/{total_days}" if total_days > 0 else "N/A",
+                     delta=f"{winning_days/total_days*100:.0f}%" if total_days > 0 else "")
+        with col2:
+            st.metric("Losing Days", f"{losing_days}/{total_days}" if total_days > 0 else "N/A",
+                     delta=f"{losing_days/total_days*100:.0f}%" if total_days > 0 else "")
+        with col3:
+            st.metric("Longest No-Loss Streak", f"{longest_no_loss} trades", delta="Consecutive profitable")
+
         # ---- Footer ----
         st.divider()
         st.caption("💡 Advanced metrics aggiornati in tempo reale dal PerformanceTracker")
