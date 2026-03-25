@@ -324,10 +324,15 @@ class TradingEngine:
                 df_1min = self.broker.get_bars(best_assets_temp[0], '1m', limit=50)
                 regime_info = self.regime_detector.detect_regime(df_1min)
                 self._current_regime = regime_info
+
+                # Costruisci la stringa delle strategie attive
+                strategy_names = ['EMA', 'BB', 'VWAP', 'LQ']
+                active_strategies = [strategy_names[i] for i, m in enumerate(regime_info.get('strategy_mask', [True]*4)) if m]
+
                 logger.info(
                     f"REGIME: {regime_info['regime']} | ADX={regime_info.get('adx', 0):.1f} | "
                     f"CI={regime_info.get('choppiness', 0):.1f} | "
-                    f"Mask={['EMA', 'BB', 'VWAP', 'LQ'][i] for i, m in enumerate(regime_info.get('strategy_mask', [True]*4)) if m}"
+                    f"Active={','.join(active_strategies)}"
                 )
             except Exception as e:
                 logger.debug(f"Errore regime detection: {e}")
