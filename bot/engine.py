@@ -324,7 +324,13 @@ class TradingEngine:
                 df_1min = self.broker.get_bars(best_assets_temp[0], '1m', limit=50)
                 regime_info = self.regime_detector.detect_regime(df_1min)
                 self._current_regime = regime_info
-            except:
+                logger.info(
+                    f"REGIME: {regime_info['regime']} | ADX={regime_info.get('adx', 0):.1f} | "
+                    f"CI={regime_info.get('choppiness', 0):.1f} | "
+                    f"Mask={['EMA', 'BB', 'VWAP', 'LQ'][i] for i, m in enumerate(regime_info.get('strategy_mask', [True]*4)) if m}"
+                )
+            except Exception as e:
+                logger.debug(f"Errore regime detection: {e}")
                 self._current_regime = {'regime': 'UNDEFINED', 'strategy_mask': [True, True, True, True]}
         else:
             self._current_regime = {'regime': 'UNDEFINED', 'strategy_mask': [True, True, True, True]}
@@ -510,7 +516,7 @@ class TradingEngine:
             symbol, 'BUY', open_trades
         )
         if not can_open_corr:
-            logger.debug(f"[{symbol}] {reason_corr}")
+            logger.info(f"[{symbol}] CorrelationGuard BLOCKED: {reason_corr}")
             return
 
         # Recupera dati di mercato
@@ -621,6 +627,13 @@ class TradingEngine:
         final_multiplier = macro_multiplier * kelly_multiplier * session_multiplier
         position_size['qty'] = position_size['qty'] * final_multiplier
         position_size['capital_at_risk'] = position_size['capital_at_risk'] * final_multiplier
+
+        # Log dei moltiplicatori applicati
+        logger.debug(
+            f"[{symbol}] Sizing Multipliers: macro={macro_multiplier:.2f}x × "
+            f"kelly={kelly_multiplier:.2f}x × session={session_multiplier:.2f}x = "
+            f"final={final_multiplier:.2f}x | Qty={position_size['qty']:.2f}"
+        )
 
         if position_size['qty'] <= 0:
             logger.warning(f"[{symbol}] Quantità calcolata = 0, operazione saltata")

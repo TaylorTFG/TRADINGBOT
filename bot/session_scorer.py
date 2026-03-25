@@ -199,9 +199,28 @@ class SessionScorer:
         - 0 se win rate odierno è nel 0° percentile (bassissimo)
         """
         try:
-            # Prendi i trade odierni
+            # Prendi i trade recenti
+            all_trades = self.db.get_trade_history(limit=500)  # ~60 giorni
+
+            if not all_trades:
+                return 50.0
+
+            # Filtra i trade odierni
             today = datetime.now(IT_TZ).date()
-            today_trades = self.db.get_trade_history_by_date(today)
+            today_trades = []
+            for t in all_trades:
+                try:
+                    if 'exit_time' in t:
+                        trade_date = datetime.fromisoformat(t['exit_time']).date()
+                    elif 'entry_time' in t:
+                        trade_date = datetime.fromisoformat(t['entry_time']).date()
+                    else:
+                        continue
+
+                    if trade_date == today:
+                        today_trades.append(t)
+                except:
+                    pass
 
             if not today_trades or len(today_trades) < 1:
                 # Se no trade oggi, usa media storica (50° percentile)
@@ -212,10 +231,9 @@ class SessionScorer:
             today_wr = wins / len(today_trades) if today_trades else 0.0
 
             # Prendi media storica (ultimi 60 giorni)
-            historical_trades = self.db.get_trade_history(limit=500)  # ~60 giorni
-            if historical_trades:
-                hist_wins = len([t for t in historical_trades if t.get('pnl', 0) > 0])
-                hist_wr = hist_wins / len(historical_trades)
+            if all_trades:
+                hist_wins = len([t for t in all_trades if t.get('pnl', 0) > 0])
+                hist_wr = hist_wins / len(all_trades)
             else:
                 hist_wr = 0.5
 

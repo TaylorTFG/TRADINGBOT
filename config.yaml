@@ -349,7 +349,7 @@ backtesting:
 # LOGGING
 # ------------------------------------------------------------
 logging:
-  level: "INFO"              # DEBUG, INFO, WARNING, ERROR
+  level: "DEBUG"             # DEBUG, INFO, WARNING, ERROR
   max_file_size_mb: 10
   backup_count: 30           # Giorni di log conservati
   log_dir: "logs"
