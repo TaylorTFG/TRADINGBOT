@@ -633,6 +633,14 @@ class TradingEngine:
         position_size['qty'] = position_size['qty'] * final_multiplier
         position_size['capital_at_risk'] = position_size['capital_at_risk'] * final_multiplier
 
+        # Arrotonda quantità per compatibilità Alpaca (max 8 decimali per crypto, 2 per stock)
+        # Per evitare doppi ordini, arrotondiamo a 6 decimali
+        is_crypto = '/' in symbol
+        if is_crypto:
+            position_size['qty'] = round(position_size['qty'], 6)
+        else:
+            position_size['qty'] = round(position_size['qty'], 2)
+
         # Log dei moltiplicatori applicati
         logger.debug(
             f"[{symbol}] Sizing Multipliers: macro={macro_multiplier:.2f}x × "
@@ -688,6 +696,19 @@ class TradingEngine:
             vote_result: Risultato del sistema di voto
             ml_result: Risultato del filtro ML
         """
+        # ---- QUANTITÀ ROUNDING (previene doppi ordini da arrotondamento Alpaca) ----
+        # Arrotonda la quantità per evitare che Alpaca esegua parzialmente l'ordine
+        # e il bot invii il resto come secondo ordine
+        is_crypto = '/' in symbol
+        if is_crypto:
+            qty = round(qty, 6)  # Crypto: max 6 decimali per Alpaca
+        else:
+            qty = round(qty, 2)  # Stock: max 2 decimali (shares intere o quarti)
+
+        if qty <= 0:
+            logger.warning(f"[{symbol}] Quantità dopo rounding = 0, ordine saltato")
+            return
+
         # ---- ATR-BASED STOPS (NUOVO) ----
         # Calcola SL/TP dinamici basati su volatilità
         try:
