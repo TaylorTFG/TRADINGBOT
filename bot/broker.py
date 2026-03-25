@@ -239,11 +239,15 @@ class BrokerClient:
 
             order_side = OrderSide.BUY if side.lower() == 'buy' else OrderSide.SELL
 
+            # Per crypto: usa GTC (Good-Till-Canceled) invece di DAY
+            # DAY non è supportato per crypto su Alpaca
+            tif = TimeInForce.GTC if '/' in symbol else TimeInForce.DAY
+
             order_request = MarketOrderRequest(
                 symbol=alpaca_symbol,
                 qty=qty,
                 side=order_side,
-                time_in_force=TimeInForce.DAY,
+                time_in_force=tif,
             )
 
             order = self._retry_on_error(
@@ -300,11 +304,15 @@ class BrokerClient:
 
             order_side = OrderSide.BUY if side.lower() == 'buy' else OrderSide.SELL
 
+            # Per crypto: usa GTC (Good-Till-Canceled) invece di DAY
+            # DAY non è supportato per crypto su Alpaca
+            tif = TimeInForce.GTC if '/' in symbol else TimeInForce.DAY
+
             order_request = LimitOrderRequest(
                 symbol=alpaca_symbol,
                 qty=qty,
                 side=order_side,
-                time_in_force=TimeInForce.DAY,
+                time_in_force=tif,
                 limit_price=limit_price,
             )
 
