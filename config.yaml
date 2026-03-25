@@ -165,7 +165,7 @@ strategy_liquidity:
   mfi_sell_threshold: 60        # MFI < 60 per SELL Sweep
 
   # Distanza di conferma sweep
-  sweep_confirmation_distance: 0.005  # 0.5%
+  sweep_confirmation_distance: 0.0015  # 0.15% (ridotto da 0.5% per entrata veloce)
 
 # ------------------------------------------------------------
 # STRATEGIA 4: VWAP MOMENTUM SCALPING (1min)
@@ -268,9 +268,9 @@ risk_management:
   # Position sizing (4 posizioni max, 25% per posizione)
   sizing:
     # Peso per sistema di voto
-    full_agreement_pct: 0.025    # 3/3 concordi → 2.5% capitale (€625 su €2500)
-    partial_agreement_pct: 0.0125 # 2/3 concordi → 1.25% capitale (€312.5)
-    max_position_pct: 0.025      # Max 2.5% per singola posizione (hard limit)
+    full_agreement_pct: 0.25    # 3/3 concordi → 25% capitale (€625 su €2500)
+    partial_agreement_pct: 0.125 # 2/3 concordi → 12.5% capitale (€312.5)
+    max_position_pct: 0.25      # Max 25% per singola posizione (hard limit)
 
 # ------------------------------------------------------------
 # CONTESTO MACRO (filtri di mercato)
@@ -284,11 +284,11 @@ market_context:
   # SP500 daily drop filter
   sp500:
     max_daily_drop_pct: 0.02    # SP500 -2% → stop nuovi acquisti
-    enabled: true
+    enabled: false
 
   # Safe haven check (oro + obbligazioni su = risk-off)
   safe_haven:
-    enabled: true
+    enabled: false
     gold_symbol: "GLD"
     bonds_symbol: "TLT"
 
