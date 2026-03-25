@@ -8,9 +8,13 @@ import logging
 import time
 import yaml
 import schedule
+import warnings
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List
 from zoneinfo import ZoneInfo
+
+# Silenzio FutureWarning di Pandas (ChainedAssignment) per log puliti
+warnings.filterwarnings('ignore', category=FutureWarning)
 
 from bot.broker import BrokerClient
 from bot.database import DatabaseManager

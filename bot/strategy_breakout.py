@@ -7,8 +7,12 @@
 import logging
 import pandas as pd
 import numpy as np
+import warnings
 from typing import Optional, Dict
 from datetime import datetime
+
+# Silenzio FutureWarning di Pandas (ChainedAssignment) per log puliti
+warnings.filterwarnings('ignore', category=FutureWarning)
 
 try:
     import ta
