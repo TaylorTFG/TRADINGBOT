@@ -23,7 +23,9 @@ from bot.market_context import MarketContextAnalyzer
 from bot.strategy_confluence import ConfluenceStrategy
 from bot.strategy_breakout import BreakoutStrategy
 from bot.strategy_sentiment import SentimentStrategy
-from bot.strategy_liquidity import LiquidityHuntStrategy
+from bot.strategy_rsi_divergence import RSIDivergenceStrategy
+from bot.strategy_sr_bounce import SRBounceStrategy
+from bot.strategy_mtf_confluence import MTFConfluenceStrategy
 from bot.news_analyzer import NewsAnalyzer
 from bot.meta_strategy import MetaStrategy
 from bot.ml_filter import MLFilter
@@ -115,11 +117,13 @@ class TradingEngine:
         # News Analyzer
         self.news_analyzer = NewsAnalyzer(self.config)
 
-        # Strategie
+        # Strategie (6 totali: 4 originali + 2 nuove)
         self.strategy_confluence = ConfluenceStrategy(self.config)
         self.strategy_breakout = BreakoutStrategy(self.config)
         self.strategy_sentiment = SentimentStrategy(self.news_analyzer, self.config)
-        self.strategy_liquidity = LiquidityHuntStrategy(self.config)
+        self.strategy_rsi_divergence = RSIDivergenceStrategy(self.config)
+        self.strategy_sr_bounce = SRBounceStrategy(self.config)
+        self.strategy_mtf_confluence = MTFConfluenceStrategy(self.config)
 
         # Meta-Strategy (sistema di voto)
         self.meta_strategy = MetaStrategy(self.config)
@@ -337,20 +341,13 @@ class TradingEngine:
                 regime_info = self.regime_detector.detect_regime(df_regime)
                 self._current_regime = regime_info
 
-                # Costruisci la stringa delle strategie attive
-                strategy_names = ['EMA', 'BB', 'VWAP', 'LQ']
-                active_strategies = [strategy_names[i] for i, m in enumerate(regime_info.get('strategy_mask', [True]*4)) if m]
-
-                logger.info(
-                    f"REGIME: {regime_info['regime']} | ADX={regime_info.get('adx', 0):.1f} | "
-                    f"CI={regime_info.get('choppiness', 0):.1f} | "
-                    f"Active={','.join(active_strategies)}"
+                # Macro context regime (non usato come proxy per gli asset)
+                logger.debug(
+                    f"BTC Macro Regime: {regime_info['regime']} | ADX={regime_info.get('adx', 0):.1f} | "
+                    f"CI={regime_info.get('choppiness', 0):.1f}"
                 )
             except Exception as e:
-                logger.debug(f"Errore regime detection: {e}")
-                self._current_regime = {'regime': 'UNDEFINED', 'strategy_mask': [True, True, True, True]}
-        else:
-            self._current_regime = {'regime': 'UNDEFINED', 'strategy_mask': [True, True, True, True]}
+                logger.debug(f"Errore regime detection BTC: {e}")
 
         # --- FASE 5: Session Scoring (NUOVO) ---
         # Valuta qualità della sessione per adaptive sizing
@@ -392,6 +389,20 @@ class TradingEngine:
                 )
             except Exception as e:
                 logger.error(f"Errore analisi {symbol}: {e}", exc_info=True)
+
+        # --- CICLO COMPLETATO: Summary Log ---
+        open_count = len(self.db.get_open_trades())
+        today_stats = self.db.get_today_stats()
+        trades_today = today_stats.get('total_trades', 0) or 0
+        pnl_today = today_stats.get('total_pnl', 0) or 0
+        win_count = today_stats.get('winning', 0) or 0
+        loss_count = today_stats.get('losing', 0) or 0
+
+        logger.info(
+            f"CICLO COMPLETATO | Open={open_count} | Trades oggi={trades_today} | "
+            f"P&L oggi=${pnl_today:+.2f} | Win={win_count} Loss={loss_count} | "
+            f"Capitale=${current_capital:.2f}"
+        )
 
     # ----------------------------------------------------------------
     # SELEZIONE ASSET
@@ -536,70 +547,97 @@ class TradingEngine:
             logger.info(f"[{symbol}] CorrelationGuard BLOCKED: {reason_corr}")
             return
 
-        # Recupera dati di mercato
-        df_5min = self.broker.get_recent_bars(symbol, '5m', 200)
-        df_15min = self.broker.get_recent_bars(symbol, '15m', 100)
-        df_daily = self.broker.get_recent_bars(symbol, '1d', 30)
+        # ===== RECUPERO DATI MULTI-TIMEFRAME (FIX BUG 1) =====
+        # Recupera 3 timeframe SEPARATI per trigger entry su 1m
+        df_1h  = self.broker.get_recent_bars(symbol, '1h', 100)    # Bias/trend macro
+        df_15m = self.broker.get_recent_bars(symbol, '15m', 100)   # Setup
+        df_1m  = self.broker.get_recent_bars(symbol, '1m', 300)    # Trigger entry
 
-        if df_5min is None or df_5min.empty:
-            logger.warning(f"[{symbol}] Nessun dato disponibile")
+        if df_1m is None or df_1m.empty:
+            logger.warning(f"[{symbol}] Nessun dato 1m disponibile")
             return
 
-        # Calcola indicatori tecnici (confluence strategy aggiunge gli indicatori)
-        df_with_indicators = self.strategy_confluence.calculate_indicators(df_5min)
+        # ===== REGIME DETECTION PER-ASSET (FIX BUG 2) =====
+        # Calcola regime individuale per ogni asset (non global BTC)
+        try:
+            regime_info = self.regime_detector.detect_regime(df_1m)
+            asset_regime = regime_info
+            logger.debug(
+                f"[{symbol}] Regime: {regime_info['regime']} | "
+                f"ADX={regime_info.get('adx', 0):.1f} | "
+                f"CI={regime_info.get('choppiness', 0):.1f}"
+            )
+        except Exception as e:
+            logger.debug(f"[{symbol}] Errore regime detection: {e}")
+            asset_regime = {'regime': 'UNDEFINED', 'strategy_mask': [True]*6}
+
+        # Calcola indicatori tecnici su df_1m (non 5m)
+        df_with_indicators = self.strategy_confluence.calculate_indicators(df_1m)
         if df_with_indicators is None:
             return
 
-        # Aggiungi colonne EMA con nome compatibile per SentimentStrategy
-        for ema_col in [f'ema_20', f'ema_50']:
-            period = int(ema_col.split('_')[1])
-            col_name = f'ema_{period}'
-            if col_name not in df_with_indicators.columns:
-                df_with_indicators[col_name] = df_5min['close'].ewm(span=period, adjust=False).mean()
-
         # --- Analisi Strategia 1: Confluence (EMA Crossover) ---
+        # Usa df_1m per segnali veloci
         signal_1 = self.strategy_confluence.analyze(df_with_indicators, symbol)
 
         # --- Analisi Strategia 2: Breakout (Bollinger Squeeze) ---
-        signal_2 = self.strategy_breakout.analyze(df_5min, df_daily, symbol)
+        # Usa df_15m per setup + df_1h per contesto macro
+        signal_2 = self.strategy_breakout.analyze(df_15m, df_1h, symbol)
 
         # --- Analisi Strategia 3: Sentiment (VWAP Momentum) ---
-        signal_3 = self.strategy_sentiment.analyze(df_with_indicators, symbol)
+        # Usa df_1m con VWAP session-based
+        signal_3 = self.strategy_sentiment.analyze(df_1m, symbol)
 
-        # --- Analisi Strategia 4: Liquidity Hunt (Sweep Detection + MFI) ---
-        signal_4 = self.strategy_liquidity.analyze(df_with_indicators, df_5min, symbol)
+        # --- Analisi Strategia 4: RSI Divergence (NEW) ---
+        # Rileva divergenze RSI su df_1m con bias 1h
+        signal_4 = self.strategy_rsi_divergence.analyze(df_1m, symbol, df_1h=df_1h)
 
-        # --- Sistema di Voto Meta-Strategy (con regime detection + strategy mask) ---
-        current_price = float(df_5min.iloc[-1]['close']) if df_5min is not None and len(df_5min) > 0 else 0
+        # --- Analisi Strategia 5: S/R Bounce (NEW) ---
+        # Identifica S/R su df_1h e attende bounce su df_1m
+        signal_5 = self.strategy_sr_bounce.analyze(df_1m, df_1h, symbol)
 
-        # Usa strategy_mask dal regime detector per filtrare strategie
-        strategy_mask = self._current_regime.get('strategy_mask', [True, True, True, True])
+        # --- Analisi Strategia 6: MTF Confluence (NEW) ---
+        # Genera segnale quando 1h, 15m, 1m sono allineati
+        signal_6 = self.strategy_mtf_confluence.analyze(df_1m, df_15m, df_1h, symbol)
+
+        # ===== VOTING SYSTEM (6 STRATEGIE CON PESI) =====
+        current_price = float(df_1m.iloc[-1]['close']) if df_1m is not None and len(df_1m) > 0 else 0
+
+        # Usa strategy_mask dal regime detector per-asset
+        strategy_mask = asset_regime.get('strategy_mask', [True]*6)
 
         vote_result = self.meta_strategy.vote(
-            signal_1, signal_2, signal_3, signal_4,
+            signal_1, signal_2, signal_3, signal_4, signal_5, signal_6,
             symbol,
-            df_5min=df_5min,
-            df_daily=df_daily,
-            current_price=current_price,
-            strategy_mask=strategy_mask,  # NUOVO: regime-based filtering
-            regime_info=self._current_regime  # NUOVO: passa regime per context
+            df_1m=df_1m, df_15m=df_15m, df_1h=df_1h,
+            strategy_mask=strategy_mask,
+            regime_info=asset_regime
         )
         final_signal = vote_result['final_signal']
-        vote_score = vote_result['vote_score']
+        vote_score = vote_result['weighted_score']  # Ora è score pesato, non conteggio voti
 
-        # Log dei singoli voti delle 4 strategie (per visibilità VWAP)
+        # Log dei singoli voti delle 6 strategie con pesi
         votes = vote_result.get('votes', {})
         logger.info(
-            f"[{symbol}] Voti strategie: "
+            f"[{symbol}] Voti strategie (pesati): "
             f"EMA={votes.get('confluence', 'HOLD')} | "
             f"BB={votes.get('breakout', 'HOLD')} | "
             f"VWAP={votes.get('sentiment', 'HOLD')} | "
-            f"LIQ={votes.get('liquidity', 'HOLD')} → "
-            f"FINALE: {final_signal}"
+            f"RSI-Div={votes.get('rsi_divergence', 'HOLD')} | "
+            f"S/R={votes.get('sr_bounce', 'HOLD')} | "
+            f"MTF={votes.get('mtf_confluence', 'HOLD')} → "
+            f"FINALE: {final_signal} (score={vote_score:.2f})"
         )
 
-        # Salva i segnali nel database (4 strategie)
-        for signal, name in [(signal_1, 'confluence'), (signal_2, 'breakout'), (signal_3, 'sentiment'), (signal_4, 'liquidity')]:
+        # Salva i segnali nel database (6 strategie)
+        for signal, name in [
+            (signal_1, 'confluence'),
+            (signal_2, 'breakout'),
+            (signal_3, 'sentiment'),
+            (signal_4, 'rsi_divergence'),
+            (signal_5, 'sr_bounce'),
+            (signal_6, 'mtf_confluence')
+        ]:
             self.db.insert_signal({
                 'symbol': symbol,
                 'strategy': name,
@@ -860,6 +898,41 @@ class TradingEngine:
                 if new_stop:
                     self.db.update_trade_stop(trade['id'], new_stop)
                     logger.debug(f"[{symbol}] Trailing stop aggiornato: ${new_stop:.2f}")
+
+                # SCALPING: Verifica chiusura parziale TP1 (50% a TP1, 50% con trailing stop)
+                partial = self.risk_manager.should_take_partial_profit(trade, current_price)
+                if partial['close_partial']:
+                    partial_qty = trade['quantity'] * 0.5
+                    try:
+                        # Chiude 50% della posizione
+                        success = self.broker.place_market_order(symbol, partial_qty, 'sell' if trade['side'] == 'buy' else 'buy')
+                        if success:
+                            # Aggiorna database con chiusura parziale
+                            self.db.update_trade_partial_close(trade['id'], partial_qty, current_price)
+
+                            # Calcola PnL parziale
+                            pnl_partial = (current_price - trade['entry_price']) * partial_qty if trade['side'] == 'buy' else (trade['entry_price'] - current_price) * partial_qty
+
+                            # Aggiorna capitale virtuale
+                            self._virtual_capital += pnl_partial
+                            self._save_virtual_capital()
+
+                            logger.info(
+                                f"[{symbol}] TP PARZIALE: chiusi {partial_qty:.6f} @ ${current_price:.2f} | "
+                                f"PnL parziale: ${pnl_partial:+.2f} | "
+                                f"Capitale: ${self._virtual_capital:.2f}"
+                            )
+
+                            # Notifica Telegram
+                            if self.notifier:
+                                self.notifier.notify_trade_close({
+                                    **trade,
+                                    'exit_price': current_price,
+                                    'quantity': partial_qty,
+                                    'pnl': pnl_partial
+                                }, "Take Profit Parziale (50%)")
+                    except Exception as e:
+                        logger.error(f"[{symbol}] Errore nella chiusura parziale TP1: {e}")
 
             except Exception as e:
                 logger.error(f"Errore monitoraggio {symbol}: {e}")

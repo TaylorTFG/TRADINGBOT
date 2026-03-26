@@ -115,9 +115,23 @@ class ConfluenceStrategy:
                 true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
                 df['atr'] = true_range.rolling(window=self.atr_period).mean()
 
-            # ---- Volume (confirmazione segnale) ----
-            df['volume_ma'] = volume.rolling(window=self.vol_period).mean()
-            df['volume_ratio'] = volume / df['volume_ma'].replace(0, 1)
+            # ---- Volume (confirmazione segnale) [FIX BUG 4/5] ----
+            # Fix per volumi NaN o 0 su BTC/ETH (Alpaca a volte ha dati incompleti)
+            # Se volume è sempre 0, skippa il filtro
+            volume_nonzero = volume.replace(0, np.nan)
+            volume_mean = volume_nonzero.mean()
+
+            if pd.isna(volume_mean) or volume_mean == 0:
+                # Alpaca non fornisce volume per questo asset
+                df['volume_ratio'] = 1.0  # Neutralizza il filtro (ratio=1 = media)
+                df['volume_ma'] = 1.0
+            else:
+                # Volume disponibile: calcola media mobile
+                df['volume_ma'] = volume_nonzero.rolling(
+                    window=self.vol_period, min_periods=3
+                ).mean().fillna(volume_mean)
+                # Clip denominatore a minimo 0.001 per evitare divisioni erratiche
+                df['volume_ratio'] = volume / df['volume_ma'].clip(lower=0.001)
 
             return df
 

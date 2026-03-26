@@ -93,8 +93,25 @@ class KellySizing:
                 }
 
             # ---- CALCOLA METRICHE ----
-            wins = [t for t in trades if t.get('pnl', 0) > 0]
-            losses = [t for t in trades if t.get('pnl', 0) <= 0]
+            # Filtra solo trade con pnl valido (non None)
+            trades_valid = [t for t in trades if t.get('pnl') is not None]
+            wins = [t for t in trades_valid if t.get('pnl', 0) > 0]
+            losses = [t for t in trades_valid if t.get('pnl', 0) <= 0]
+
+            if not trades_valid or len(trades_valid) < 5:
+                # Insufficienti dati validi
+                return {
+                    'kelly_fraction': 0.0,
+                    'kelly_fraction_safe': self.kelly_default,
+                    'position_size_pct': self.kelly_default,
+                    'win_rate': 0.5,
+                    'avg_win': 0.0,
+                    'avg_loss': 0.0,
+                    'profit_factor': 1.0,
+                    'trades_count': len(trades_valid),
+                    'recommendation': f'< 5 valid trades ({len(trades_valid)} attuali), uso default {self.kelly_default*100:.0f}%',
+                    'timestamp': datetime.now().isoformat()
+                }
 
             if not wins or not losses:
                 # Edge non definito (100% win o 100% loss)
@@ -111,8 +128,8 @@ class KellySizing:
                     'timestamp': datetime.now().isoformat()
                 }
 
-            # Win rate e loss rate
-            win_rate = len(wins) / len(trades)
+            # Win rate e loss rate (usa trades_valid per denominatore)
+            win_rate = len(wins) / len(trades_valid)
             loss_rate = 1.0 - win_rate
 
             # Profitti e perdite medie (in $ per trade)

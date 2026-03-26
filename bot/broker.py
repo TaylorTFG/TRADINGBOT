@@ -423,7 +423,7 @@ class BrokerClient:
             symbol: Simbolo da chiudere
 
         Returns:
-            True se successo
+            True se successo o posizione non trovata (già chiusa)
         """
         try:
             alpaca_symbol = symbol.replace('/', '')
@@ -434,6 +434,11 @@ class BrokerClient:
             logger.info(f"Posizione chiusa: {symbol}")
             return True
         except Exception as e:
+            error_str = str(e)
+            # Se la posizione non esiste, è già chiusa - non è un errore
+            if "position not found" in error_str.lower() or "40410000" in error_str:
+                logger.info(f"Posizione non trovata su Alpaca (già chiusa): {symbol}")
+                return True
             logger.error(f"Errore chiusura posizione {symbol}: {e}")
             return False
 

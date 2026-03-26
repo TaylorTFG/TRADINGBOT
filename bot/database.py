@@ -66,6 +66,10 @@ class DatabaseManager:
                     alpaca_order_id TEXT,
                     ml_confidence REAL,
                     vote_score INTEGER,
+                    partial_tp_done INTEGER DEFAULT 0,
+                    partial_tp_quantity REAL,
+                    partial_tp_price REAL,
+                    partial_tp_time DATETIME,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -236,6 +240,31 @@ class DatabaseManager:
                 (new_stop, new_stop, trade_id)
             )
 
+    def update_trade_partial_close(self, trade_id: int, quantity_closed: float, close_price: float):
+        """
+        Registra una chiusura parziale TP1 (50% della posizione).
+
+        Args:
+            trade_id: ID del trade
+            quantity_closed: Quantità chiusa
+            close_price: Prezzo di chiusura
+        """
+        with self._get_connection() as conn:
+            conn.execute("""
+                UPDATE trades SET
+                    partial_tp_done = 1,
+                    partial_tp_quantity = ?,
+                    partial_tp_price = ?,
+                    partial_tp_time = ?
+                WHERE id = ?
+            """, (
+                quantity_closed,
+                close_price,
+                datetime.now().isoformat(),
+                trade_id
+            ))
+            logger.info(f"Trade {trade_id}: Partial TP chiuso {quantity_closed:.6f} @ {close_price:.2f}")
+
     def get_open_trades(self) -> List[Dict]:
         """Restituisce tutti i trade attualmente aperti."""
         with self._get_connection() as conn:
@@ -398,70 +427,78 @@ class DatabaseManager:
         Returns:
             Dizionario con Sharpe ratio, win rate, profit factor, ecc.
         """
-        with self._get_connection() as conn:
-            trades = conn.execute("""
-                SELECT pnl, pnl_pct, entry_time, exit_time, strategy
-                FROM trades WHERE status = 'closed'
-                ORDER BY exit_time
-            """).fetchall()
+        try:
+            with self._get_connection() as conn:
+                trades = conn.execute("""
+                    SELECT pnl, pnl_pct, entry_time, exit_time, strategy
+                    FROM trades WHERE status = 'closed'
+                    ORDER BY exit_time
+                """).fetchall()
 
-        if not trades:
+            if not trades:
+                return {}
+
+            # Filtra solo trade con pnl valido (non None)
+            pnls = [float(t['pnl']) for t in trades if t['pnl'] is not None and isinstance(t['pnl'], (int, float))]
+            pnl_pcts = [float(t['pnl_pct']) for t in trades if t['pnl_pct'] is not None and isinstance(t['pnl_pct'], (int, float))]
+
+            if not pnls:
+                return {}
+
+            winning = [p for p in pnls if p > 0]
+            losing = [p for p in pnls if p <= 0]
+
+            total_pnl = sum(pnls)
+            win_rate = len(winning) / len(pnls) if pnls else 0
+
+            # Profit Factor
+            gross_profit = sum(winning) if winning else 0
+            gross_loss = abs(sum(losing)) if losing else 0
+            profit_factor = gross_profit / gross_loss if gross_loss > 0 else float('inf')
+
+            # Sharpe Ratio (semplificato)
+            import statistics
+            if len(pnl_pcts) > 1:
+                mean_return = statistics.mean(pnl_pcts)
+                std_return = statistics.stdev(pnl_pcts)
+                sharpe = (mean_return / std_return) * (252 ** 0.5) if std_return > 0 else 0
+            else:
+                sharpe = 0
+
+            # Max Drawdown
+            cumulative = []
+            running = 0
+            for p in pnls:
+                running += p
+                cumulative.append(running)
+
+            max_dd = 0
+            peak = cumulative[0] if cumulative else 0
+            for val in cumulative:
+                if val > peak:
+                    peak = val
+                dd = (peak - val) / abs(peak) if peak != 0 else 0
+                if dd > max_dd:
+                    max_dd = dd
+
+            return {
+                'total_trades': len(pnls),
+                'winning_trades': len(winning),
+                'losing_trades': len(losing),
+                'win_rate': win_rate,
+                'total_pnl': total_pnl,
+                'avg_pnl': total_pnl / len(pnls) if pnls else 0,
+                'profit_factor': profit_factor,
+                'sharpe_ratio': sharpe,
+                'max_drawdown': max_dd,
+                'gross_profit': gross_profit,
+                'gross_loss': gross_loss,
+                'avg_win': statistics.mean(winning) if winning else 0,
+                'avg_loss': statistics.mean(losing) if losing else 0,
+            }
+        except Exception as e:
+            logger.error(f"Errore calcolo performance metrics: {e}")
             return {}
-
-        pnls = [t['pnl'] for t in trades]
-        pnl_pcts = [t['pnl_pct'] for t in trades]
-
-        winning = [p for p in pnls if p > 0]
-        losing = [p for p in pnls if p <= 0]
-
-        total_pnl = sum(pnls)
-        win_rate = len(winning) / len(pnls) if pnls else 0
-
-        # Profit Factor
-        gross_profit = sum(winning) if winning else 0
-        gross_loss = abs(sum(losing)) if losing else 0
-        profit_factor = gross_profit / gross_loss if gross_loss > 0 else float('inf')
-
-        # Sharpe Ratio (semplificato)
-        import statistics
-        if len(pnl_pcts) > 1:
-            mean_return = statistics.mean(pnl_pcts)
-            std_return = statistics.stdev(pnl_pcts)
-            sharpe = (mean_return / std_return) * (252 ** 0.5) if std_return > 0 else 0
-        else:
-            sharpe = 0
-
-        # Max Drawdown
-        cumulative = []
-        running = 0
-        for p in pnls:
-            running += p
-            cumulative.append(running)
-
-        max_dd = 0
-        peak = cumulative[0] if cumulative else 0
-        for val in cumulative:
-            if val > peak:
-                peak = val
-            dd = (peak - val) / abs(peak) if peak != 0 else 0
-            if dd > max_dd:
-                max_dd = dd
-
-        return {
-            'total_trades': len(pnls),
-            'winning_trades': len(winning),
-            'losing_trades': len(losing),
-            'win_rate': win_rate,
-            'total_pnl': total_pnl,
-            'avg_pnl': total_pnl / len(pnls) if pnls else 0,
-            'profit_factor': profit_factor,
-            'sharpe_ratio': sharpe,
-            'max_drawdown': max_dd,
-            'gross_profit': gross_profit,
-            'gross_loss': gross_loss,
-            'avg_win': statistics.mean(winning) if winning else 0,
-            'avg_loss': statistics.mean(losing) if losing else 0,
-        }
 
     def get_strategy_performance(self) -> List[Dict]:
         """Performance separata per ogni strategia."""

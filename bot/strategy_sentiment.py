@@ -57,27 +57,56 @@ class SentimentStrategy:
 
     def calculate_vwap(self, df: pd.DataFrame) -> Optional[pd.Series]:
         """
-        Calcola VWAP (Volume Weighted Average Price).
+        Calcola SESSION VWAP (Volume Weighted Average Price).
 
+        Per crypto: sessione = da 00:00 UTC ogni giorno
         VWAP = cumsum(close * volume) / cumsum(volume)
 
         Args:
-            df: DataFrame con OHLCV
+            df: DataFrame con OHLCV e timestamp index
 
         Returns:
-            Serie pandas con valori VWAP
+            Serie pandas con valori VWAP, reindexed al df originale
         """
         if df is None or len(df) < 2:
             return None
 
         try:
             df = df.copy()
-            typical_price = (df['high'] + df['low'] + df['close']) / 3
-            vwap = (typical_price * df['volume']).cumsum() / df['volume'].cumsum()
+
+            # Filtra per includere solo candele dalla sessione corrente (00:00 UTC)
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+
+            session_start = datetime.now(ZoneInfo('UTC')).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+
+            session_df = df[df.index >= session_start] if hasattr(df.index, 'tz_localize') or df.index.tz else df
+
+            # Fallback: se sessione insufficiente (<5 candele), usa ultime 120 candele (2 ore)
+            if len(session_df) < 5:
+                session_df = df.tail(120)
+
+            # Calcola VWAP su session_df
+            typical_price = (session_df['high'] + session_df['low'] + session_df['close']) / 3
+            vwap_values = (typical_price * session_df['volume']).cumsum() / session_df['volume'].cumsum()
+
+            # Reindex al df originale con forward fill per allineamento
+            vwap = vwap_values.reindex(df.index, method='ffill')
+
             return vwap
+
         except Exception as e:
-            logger.error(f"Errore calcolo VWAP: {e}")
-            return None
+            logger.error(f"Errore calcolo session VWAP: {e}")
+            # Fallback: VWAP su tutto il df
+            try:
+                df = df.copy()
+                typical_price = (df['high'] + df['low'] + df['close']) / 3
+                vwap = (typical_price * df['volume']).cumsum() / df['volume'].cumsum()
+                return vwap
+            except:
+                return None
 
     def calculate_macd(self, df: pd.DataFrame) -> Dict:
         """

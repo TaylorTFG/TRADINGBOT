@@ -1,7 +1,6 @@
 # ============================================================
-# META-STRATEGY - SISTEMA DI VOTO COMBINATO
-# Combina i segnali delle 3 strategie per prendere
-# la decisione finale di trading
+# META-STRATEGY - SISTEMA DI VOTO PESATO CON 6 STRATEGIE
+# Combina i segnali con pesi differenziati per qualità
 # ============================================================
 
 import logging
@@ -14,376 +13,205 @@ logger = logging.getLogger(__name__)
 
 class MetaStrategy:
     """
-    Sistema di voto che combina 4 strategie con filtro trend 5min.
+    Sistema di voto pesato che combina 6 strategie.
 
-    Regole (per 4 strategie):
-    - 3/4 o 4/4 concordano BUY → entrata con size massima (2.5% capitale)
-    - 2/4 concordano BUY → entrata con size ridotta (1.25% capitale)
-    - <2 → nessuna operazione (HOLD)
+    Strategie e pesi:
+    1. Confluence (EMA Crossover) - 1.0x
+    2. Breakout (Bollinger Squeeze) - 0.8x
+    3. Sentiment (VWAP Momentum) - 0.8x
+    4. RSI Divergence - 1.2x
+    5. S/R Bounce - 1.0x
+    6. MTF Confluence - 2.0x (peso doppio — qualità massima)
 
-    Filtro Trend 5min (protegge da falsi segnali):
-    - Se trend 5min è BEARISH → blocca segnali BUY 1min
-    - Se trend 5min è BULLISH → blocca segnali SELL 1min
-
-    Strategie:
-    1. Confluence (EMA Crossover)
-    2. Breakout (Bollinger Squeeze)
-    3. Sentiment (VWAP Momentum)
-    4. Liquidity Hunt (Sweep Detection + MFI)
+    Regime-based routing:
+    - TRENDING: abilita confluence, sentiment, rsi_div, mtf → min_weighted_score = 1.5
+    - RANGING: abilita breakout, sr_bounce, rsi_div → min_weighted_score = 1.5
+    - UNDEFINED: tutti → min_weighted_score = 2.5
     """
 
+    # Pesi per strategia (determina importanza nel voting)
+    STRATEGY_WEIGHTS = {
+        'confluence': 1.0,
+        'breakout': 0.8,
+        'sentiment': 0.8,
+        'rsi_divergence': 1.2,
+        'sr_bounce': 1.0,
+        'mtf_confluence': 2.0,  # Peso doppio — massima qualità
+    }
+
     def __init__(self, config: dict):
-        """
-        Inizializza il meta-strategy.
-
-        Args:
-            config: Configurazione dal config.yaml
-        """
+        """Inizializza il meta-strategy."""
         self.config = config
-
-        # Cache per trend 5min (evita ricalcolo)
-        self._trend_cache = {}  # {symbol: {'trend': ..., 'timestamp': ...}}
-
-    def calculate_ema_200_filter(self, df_daily) -> Optional[float]:
-        """
-        Calcola EMA 200 su daily timeframe per trend globale.
-
-        Usato come filtro contestuale:
-        - BUY solo se price > EMA 200 (trend rialzista globale)
-        - SELL solo se price < EMA 200 (trend ribassista globale)
-
-        Args:
-            df_daily: DataFrame daily con OHLCV
-
-        Returns:
-            EMA 200 value, oppure None se dati insufficienti
-        """
-        if df_daily is None or len(df_daily) < 250:  # Serve minimo 250 candele daily
-            return None
-
-        try:
-            close = df_daily['close']
-            ema_200 = close.ewm(span=200, adjust=False).mean()
-            return float(ema_200.iloc[-1])
-        except Exception as e:
-            logger.warning(f"Errore calcolo EMA 200: {e}")
-            return None
-
-    def calculate_5min_trend(self, df_5min) -> str:
-        """
-        Calcola il trend su timeframe 5min usando EMA 20.
-
-        Usa EMA 20 vs close:
-        - Se close > EMA20 → trend BULLISH
-        - Se close < EMA20 → trend BEARISH
-        - Altrimenti → NEUTRAL
-
-        Args:
-            df_5min: DataFrame 5min con OHLCV
-
-        Returns:
-            String: 'BULLISH', 'BEARISH', o 'NEUTRAL'
-        """
-        if df_5min is None or len(df_5min) < 25:
-            return 'NEUTRAL'
-
-        try:
-            close = df_5min['close']
-            ema20 = close.ewm(span=20, adjust=False).mean()
-
-            last_close = float(close.iloc[-1])
-            last_ema20 = float(ema20.iloc[-1])
-
-            if pd.notna(last_ema20) and last_ema20 > 0:
-                if last_close > last_ema20 * 1.0005:  # Margine 0.05% per evitare fluttuazioni
-                    return 'BULLISH'
-                elif last_close < last_ema20 * 0.9995:
-                    return 'BEARISH'
-
-            return 'NEUTRAL'
-        except Exception as e:
-            logger.warning(f"Errore calcolo trend 5min: {e}")
-            return 'NEUTRAL'
+        self._trend_cache = {}
 
     def vote(
         self,
         confluence_signal: Dict,
         breakout_signal: Dict,
         sentiment_signal: Dict,
-        liquidity_signal: Dict,
+        rsi_div_signal: Dict,
+        sr_bounce_signal: Dict,
+        mtf_signal: Dict,
         symbol: str,
-        df_5min=None,
-        df_daily=None,
-        current_price: Optional[float] = None,
-        strategy_mask: Optional[List[bool]] = None,  # NUOVO: regime-based filtering
-        regime_info: Optional[Dict] = None  # NUOVO: regime detection info
+        df_1m=None,
+        df_15m=None,
+        df_1h=None,
+        strategy_mask: Optional[List[bool]] = None,
+        regime_info: Optional[Dict] = None
     ) -> Dict:
         """
-        Raccoglie i voti dalle 4 strategie e calcola il segnale finale.
-
-        Applica filtri contestuali:
-        - Trend 5min (EMA 20) per protezione breve termine
-        - EMA 200 daily (trend globale) per direzione operazioni
-        - Regime detection (TRENDING/RANGING) per selezione strategie rilevanti
+        Raccoglie i voti dalle 6 strategie e calcola il segnale finale con pesi.
 
         Args:
-            confluence_signal: Segnale dalla Strategia 1 (confluenza EMA)
-            breakout_signal: Segnale dalla Strategia 2 (breakout Bollinger)
-            sentiment_signal: Segnale dalla Strategia 3 (sentiment VWAP)
-            liquidity_signal: Segnale dalla Strategia 4 (liquidity hunt)
+            confluence_signal, breakout_signal, sentiment_signal,
+            rsi_div_signal, sr_bounce_signal, mtf_signal: Segnali strategie
             symbol: Simbolo in analisi
-            df_5min: DataFrame 5min per filtro trend 5min
-            df_daily: DataFrame daily per filtro EMA 200
-            current_price: Prezzo corrente per validazione EMA 200
-            strategy_mask: List[bool] (4 elementi) - quali strategie attivare per regime
-            regime_info: Dict con info regime detection (regime, confidence, ...)
+            df_1m, df_15m, df_1h: DataFrame multi-timeframe
+            strategy_mask: List[bool] (6 elementi) - strategie attive per regime
+            regime_info: Dict con info regime (regime, confidence, strategy_mask)
 
         Returns:
-            Dizionario con final_signal, vote_score, action, details
+            Dizionario con final_signal, weighted_score, votes, details
         """
-        # ---- FILTRO TREND 5min ----
-        # Questo filtro protegge da falsi segnali contro il trend di breve periodo
-        trend_5min = self.calculate_5min_trend(df_5min) if df_5min is not None else 'NEUTRAL'
 
-        # ---- FILTRO EMA 200 DAILY (CONTEXTUAL) ----
-        # Filtro globale di trend: BUY solo se price > EMA200, SELL solo se price < EMA200
-        ema_200 = self.calculate_ema_200_filter(df_daily) if df_daily is not None else None
-        contextual_filter_applied = False
-
-        # Estrai i voti dalle 4 strategie
+        # Estrai i voti dalle 6 strategie
         votes = {
             'confluence': confluence_signal.get('signal', 'HOLD'),
             'breakout': breakout_signal.get('signal', 'HOLD'),
             'sentiment': sentiment_signal.get('signal', 'HOLD'),
-            'liquidity': liquidity_signal.get('signal', 'HOLD'),
+            'rsi_divergence': rsi_div_signal.get('signal', 'HOLD'),
+            'sr_bounce': sr_bounce_signal.get('signal', 'HOLD'),
+            'mtf_confluence': mtf_signal.get('signal', 'HOLD'),
         }
 
         # ---- APPLICA STRATEGY MASK (REGIME DETECTION) ----
-        # Filtra strategie non rilevanti basato su regime market
         if strategy_mask is None:
-            strategy_mask = [True, True, True, True]  # Default: tutti attivi
+            strategy_mask = [True] * 6
 
-        strategy_names = ['confluence', 'breakout', 'sentiment', 'liquidity']
+        strategy_names = ['confluence', 'breakout', 'sentiment', 'rsi_divergence', 'sr_bounce', 'mtf_confluence']
         regime_str = regime_info.get('regime', 'UNDEFINED') if regime_info else 'UNDEFINED'
 
+        # Disabilita strategie non rilevanti per il regime
         for i, (strategy_name, enabled) in enumerate(zip(strategy_names, strategy_mask)):
             if not enabled:
                 logger.debug(f"[{symbol}] Strategia {strategy_name} disabilitata in regime {regime_str}")
                 votes[strategy_name] = 'HOLD'
 
-        # ---- APPLICA FILTRO TREND 5min ----
-        # Se trend 5min è BEARISH, blocca i segnali BUY (aspetta un segnale SELL prima)
-        for strategy_name in ['confluence', 'breakout', 'sentiment', 'liquidity']:
-            if trend_5min == 'BEARISH' and votes[strategy_name] == 'BUY':
-                votes[strategy_name] = 'HOLD'
-                logger.debug(f"[{symbol}] Segnale BUY bloccato ({strategy_name}): trend 5min è BEARISH")
+        # ---- CALCOLO WEIGHTED SIGNAL ----
+        # Somma i pesi per BUY e SELL (non conta voti)
+        buy_weight = sum(
+            self.STRATEGY_WEIGHTS[s] for s in strategy_names
+            if votes.get(s) == 'BUY'
+        )
+        sell_weight = sum(
+            self.STRATEGY_WEIGHTS[s] for s in strategy_names
+            if votes.get(s) == 'SELL'
+        )
 
-            if trend_5min == 'BULLISH' and votes[strategy_name] == 'SELL':
-                votes[strategy_name] = 'HOLD'
-                logger.debug(f"[{symbol}] Segnale SELL bloccato ({strategy_name}): trend 5min è BULLISH")
-
-        # ---- APPLICA FILTRO EMA 200 (Contextual Filter) ----
-        # EMA 200 determina la direzione operativa principale
-        if ema_200 is not None and current_price is not None:
-            if current_price < ema_200:
-                # Sotto EMA 200 = trend BEARISH globale → blocca BUY
-                for strategy_name in ['confluence', 'breakout', 'sentiment', 'liquidity']:
-                    if votes[strategy_name] == 'BUY':
-                        votes[strategy_name] = 'HOLD'
-                        logger.debug(f"[{symbol}] Segnale BUY bloccato ({strategy_name}): price < EMA200")
-                        contextual_filter_applied = True
-            elif current_price > ema_200:
-                # Sopra EMA 200 = trend BULLISH globale → blocca SELL
-                for strategy_name in ['confluence', 'breakout', 'sentiment', 'liquidity']:
-                    if votes[strategy_name] == 'SELL':
-                        votes[strategy_name] = 'HOLD'
-                        logger.debug(f"[{symbol}] Segnale SELL bloccato ({strategy_name}): price > EMA200")
-                        contextual_filter_applied = True
-
-        # Conta i voti per BUY, SELL, HOLD
-        buy_votes = sum(1 for v in votes.values() if v == 'BUY')
-        sell_votes = sum(1 for v in votes.values() if v == 'SELL')
-        hold_votes = sum(1 for v in votes.values() if v == 'HOLD')
+        # Determina soglia minima in base al regime
+        if regime_info:
+            regime = regime_info.get('regime', 'UNDEFINED')
+            if regime == 'TRENDING':
+                min_weighted_score = 1.5
+            elif regime == 'RANGING':
+                min_weighted_score = 1.5
+            else:  # UNDEFINED
+                min_weighted_score = 2.5
+        else:
+            min_weighted_score = 2.5
 
         # Determina il segnale finale
         final_signal = 'HOLD'
-        vote_score = 0
-        size_type = 'none'
-        action = 'none'
+        weighted_score = 0
+        buy_votes = sum(1 for v in votes.values() if v == 'BUY')
+        sell_votes = sum(1 for v in votes.values() if v == 'SELL')
         reason = ''
 
-        # Determina soglia minima di voti richiesti in base al regime
-        # In regime TRENDING: 2 strategie attive (EMA + VWAP) → min_score_trending = 1
-        # Altrimenti: 4 strategie attive → min_score = 2
-        min_score_threshold = 2
-        if regime_info and regime_info.get('regime') == 'TRENDING':
-            # In TRENDING, solo EMA e VWAP votano
-            min_score_threshold = 1
-            logger.debug(f"[{symbol}] Regime TRENDING: min_score_threshold abbassato a 1")
-
-        # Con 4 strategie: 3/4 o 4/4 = full, 2/4 = half, <2 = HOLD
-        # Con 2 strategie (TRENDING): 2/2 = full, 1/2 = half, <1 = HOLD
-        if buy_votes >= 3:
+        if buy_weight >= min_weighted_score:
             final_signal = 'BUY'
-            vote_score = buy_votes
-            size_type = 'full'  # 2.5% capitale (scalato per €2500)
-            action = 'open_full'
-            reason = f'{buy_votes}/4 strategie concordano BUY → entrata con size massima'
-
-        elif buy_votes == 2:
-            final_signal = 'BUY'
-            vote_score = 2
-            size_type = 'half'  # 1.25% capitale (scalato per €2500)
-            action = 'open_half'
-            reason = f'{buy_votes}/4 strategie concordano BUY → entrata con size ridotta'
-
-        elif buy_votes == 1 and min_score_threshold == 1:
-            # In regime TRENDING: solo 1 strategia BUY (EMA o VWAP) → trade con size minore
-            final_signal = 'BUY'
-            vote_score = 1
-            size_type = 'half'  # 1.25% capitale - cautela con consenso minimo
-            action = 'open_half'
-            reason = f'Regime TRENDING: {buy_votes}/2 strategie BUY → entrata cautela'
-
-        elif sell_votes >= 3:
+            weighted_score = buy_weight
+            reason = f'{buy_votes} strategie BUY (peso={buy_weight:.1f}) → entrata'
+        elif sell_weight >= min_weighted_score:
             final_signal = 'SELL'
-            vote_score = -sell_votes
-            size_type = 'full'
-            action = 'close_or_short'
-            reason = f'{sell_votes}/4 strategie concordano SELL → uscita/short'
-
-        elif sell_votes == 2:
-            final_signal = 'SELL'
-            vote_score = -2
-            size_type = 'half'
-            action = 'close'
-            reason = f'{sell_votes}/4 strategie concordano SELL → considera uscita'
-
-        elif sell_votes == 1 and min_score_threshold == 1:
-            # In regime TRENDING: 1 strategia SELL → uscita cautela
-            final_signal = 'SELL'
-            vote_score = -1
-            size_type = 'half'
-            action = 'close'
-            reason = f'Regime TRENDING: {sell_votes}/2 strategie SELL → uscita cautela'
-
-        elif sell_votes == 1:
-            final_signal = 'HOLD'
-            vote_score = -1
-            action = 'watch'
-            reason = '1/4 strategie SELL → monitora posizioni aperte'
-
+            weighted_score = sell_weight
+            reason = f'{sell_votes} strategie SELL (peso={sell_weight:.1f}) → uscita'
         else:
             final_signal = 'HOLD'
-            vote_score = 0
-            action = 'none'
-            reason = 'Nessun consenso raggiunto'
+            reason = f'Consenso insufficiente: BUY-peso={buy_weight:.1f}, SELL-peso={sell_weight:.1f} (min={min_weighted_score:.1f})'
 
-        # Calcola confidence media delle strategie che hanno votato
+        # Calcola score medio delle strategie che hanno votato
         confidences = []
-        if buy_votes > 0 or sell_votes > 0:
-            for name, signal_dict in [
-                ('confluence', confluence_signal),
-                ('breakout', breakout_signal),
-                ('sentiment', sentiment_signal),
-                ('liquidity', liquidity_signal)
-            ]:
-                conf = signal_dict.get('confidence', signal_dict.get('score', 0))
-                if conf is not None:
-                    confidences.append(float(conf) if conf else 0)
+        for name, signal_dict in [
+            ('confluence', confluence_signal),
+            ('breakout', breakout_signal),
+            ('sentiment', sentiment_signal),
+            ('rsi_divergence', rsi_div_signal),
+            ('sr_bounce', sr_bounce_signal),
+            ('mtf_confluence', mtf_signal)
+        ]:
+            conf = signal_dict.get('score', signal_dict.get('confidence', 0))
+            if conf is not None:
+                confidences.append(float(conf) if conf else 0)
 
         avg_confidence = sum(confidences) / len(confidences) if confidences else 0
 
-        # Raccoglie i dettagli dei singoli segnali (4 strategie)
-        signal_details = {
-            'confluence': {
-                'vote': votes['confluence'],
-                'score': confluence_signal.get('score', 0),
-                'buy_score': confluence_signal.get('buy_score', 0),
-                'sell_score': confluence_signal.get('sell_score', 0),
-                'details': confluence_signal.get('details', {}),
-            },
-            'breakout': {
-                'vote': votes['breakout'],
-                'level': breakout_signal.get('level'),
-                'volume_ratio': breakout_signal.get('volume_ratio', 1),
-                'adx': breakout_signal.get('adx', 0),
-                'details': breakout_signal.get('details', {}),
-            },
-            'sentiment': {
-                'vote': votes['sentiment'],
-                'score': sentiment_signal.get('sentiment_score', 0),
-                'classification': sentiment_signal.get('sentiment_classification', 'NEUTRAL'),
-                'article_count': sentiment_signal.get('article_count', 0),
-                'details': sentiment_signal.get('details', {}),
-            },
-            'liquidity': {
-                'vote': votes['liquidity'],
-                'score': liquidity_signal.get('score', 0),
-                'mfi': liquidity_signal.get('indicators', {}).get('mfi', 0),
-                'sweep_type': liquidity_signal.get('details', {}).get('sweep_type', 'NONE'),
-                'details': liquidity_signal.get('details', {}),
-            }
-        }
-
+        # Costruisci il risultato
         result = {
             'final_signal': final_signal,
-            'vote_score': vote_score,
+            'weighted_score': weighted_score,
             'buy_votes': buy_votes,
             'sell_votes': sell_votes,
-            'hold_votes': hold_votes,
-            'size_type': size_type,
-            'action': action,
+            'hold_votes': 6 - buy_votes - sell_votes,
+            'min_weighted_score': min_weighted_score,
+            'buy_weight': buy_weight,
+            'sell_weight': sell_weight,
             'reason': reason,
             'avg_confidence': avg_confidence,
             'symbol': symbol,
             'timestamp': datetime.now().isoformat(),
             'votes': votes,
-            'trend_5min': trend_5min,  # Filtro trend 5min
-            'regime_info': regime_info,  # NUOVO: Info regime detection (TRENDING/RANGING)
-            'signal_details': signal_details,
-            'strategy_name': self._get_leading_strategy(votes, confluence_signal, breakout_signal, sentiment_signal)
+            'regime_info': regime_info,
+            'signal_details': {
+                'confluence': {
+                    'vote': votes['confluence'],
+                    'score': confluence_signal.get('score', 0),
+                    'weight': self.STRATEGY_WEIGHTS['confluence'],
+                },
+                'breakout': {
+                    'vote': votes['breakout'],
+                    'score': breakout_signal.get('score', 0),
+                    'weight': self.STRATEGY_WEIGHTS['breakout'],
+                },
+                'sentiment': {
+                    'vote': votes['sentiment'],
+                    'score': sentiment_signal.get('sentiment_score', sentiment_signal.get('score', 0)),
+                    'weight': self.STRATEGY_WEIGHTS['sentiment'],
+                },
+                'rsi_divergence': {
+                    'vote': votes['rsi_divergence'],
+                    'score': rsi_div_signal.get('score', 0),
+                    'weight': self.STRATEGY_WEIGHTS['rsi_divergence'],
+                },
+                'sr_bounce': {
+                    'vote': votes['sr_bounce'],
+                    'score': sr_bounce_signal.get('score', 0),
+                    'weight': self.STRATEGY_WEIGHTS['sr_bounce'],
+                },
+                'mtf_confluence': {
+                    'vote': votes['mtf_confluence'],
+                    'score': mtf_signal.get('score', 0),
+                    'weight': self.STRATEGY_WEIGHTS['mtf_confluence'],
+                }
+            }
         }
 
         logger.info(
-            f"[{symbol}] MetaStrategy: {final_signal} | "
-            f"Voti: BUY={buy_votes}, SELL={sell_votes}, HOLD={hold_votes} | "
+            f"[{symbol}] MetaStrategy: {final_signal} (score={weighted_score:.1f}) | "
+            f"Voti: BUY={buy_votes} SELL={sell_votes} HOLD={6-buy_votes-sell_votes} | "
             f"{reason}"
         )
 
         return result
-
-    def _get_leading_strategy(
-        self,
-        votes: Dict,
-        confluence_signal: Dict,
-        breakout_signal: Dict,
-        sentiment_signal: Dict
-    ) -> str:
-        """
-        Identifica la strategia principale che ha generato il segnale.
-
-        Returns:
-            Nome della strategia con confidence più alta
-        """
-        # Mappa segnali a confidence
-        scores = {}
-
-        conf_score = confluence_signal.get('score', 0) or 0
-        break_score = 1 if breakout_signal.get('signal') != 'HOLD' else 0
-        sent_score = abs(sentiment_signal.get('sentiment_score', 0) or 0)
-
-        if votes.get('confluence') != 'HOLD':
-            scores['confluence'] = conf_score
-        if votes.get('breakout') != 'HOLD':
-            scores['breakout'] = break_score
-        if votes.get('sentiment') != 'HOLD':
-            scores['sentiment'] = sent_score
-
-        if not scores:
-            return 'none'
-
-        return max(scores, key=scores.get)
 
     def should_close_position(
         self,
@@ -393,15 +221,7 @@ class MetaStrategy:
         """
         Verifica se una posizione aperta dovrebbe essere chiusa
         basandosi sui nuovi segnali.
-
-        Args:
-            position: Dati della posizione aperta
-            current_signals: Dizionario con i segnali attuali per il simbolo
-
-        Returns:
-            Dizionario con should_close, reason
         """
-        vote_score = current_signals.get('vote_score', 0)
         final_signal = current_signals.get('final_signal', 'HOLD')
         position_side = position.get('side', 'buy')
 
@@ -409,7 +229,7 @@ class MetaStrategy:
         if position_side == 'buy' and final_signal == 'SELL':
             return {
                 'should_close': True,
-                'reason': f'Segnale SELL ricevuto (voti: {current_signals.get("sell_votes", 0)}/3)'
+                'reason': f'Segnale SELL ricevuto (voti: {current_signals.get("sell_votes", 0)}/6)'
             }
 
         # Posizione short + segnale BUY → chiudi
@@ -417,13 +237,6 @@ class MetaStrategy:
             return {
                 'should_close': True,
                 'reason': f'Segnale BUY ricevuto su posizione short'
-            }
-
-        # Anche 1 voto SELL su posizione long → attenzione
-        if position_side == 'buy' and current_signals.get('sell_votes', 0) >= 2:
-            return {
-                'should_close': True,
-                'reason': f'2+ voti SELL su posizione long'
             }
 
         return {'should_close': False, 'reason': ''}

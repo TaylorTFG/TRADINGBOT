@@ -343,6 +343,43 @@ class RiskManager:
         else:
             return current_price <= take_profit and take_profit > 0
 
+    def should_take_partial_profit(self, trade: Dict, current_price: float) -> Dict:
+        """
+        Verifica se il 50% della posizione deve essere chiuso (TP1).
+
+        Strategia: Close 50% at TP1, leave 50% with trailing stop until TP2.
+
+        Args:
+            trade: Dati del trade
+            current_price: Prezzo corrente
+
+        Returns:
+            Dict con {'close_partial': bool, 'fraction': 0.5, 'reason': str}
+        """
+        # Se già chiuso il primo 50%, no partial close
+        if trade.get('partial_tp_done'):
+            return {'close_partial': False}
+
+        entry = trade['entry_price']
+        side = trade.get('side', 'buy')
+        tp1_pct = self.risk_config.get('take_profit_1_pct', 0.008)
+        tp1 = entry * (1 + tp1_pct) if side == 'buy' else entry * (1 - tp1_pct)
+
+        if side == 'buy' and current_price >= tp1:
+            return {
+                'close_partial': True,
+                'fraction': 0.5,
+                'reason': f"TP1 raggiunto @ {current_price:.2f} (+{tp1_pct*100:.1f}%)"
+            }
+        elif side == 'sell' and current_price <= tp1:
+            return {
+                'close_partial': True,
+                'fraction': 0.5,
+                'reason': f"TP1 raggiunto @ {current_price:.2f} (-{tp1_pct*100:.1f}%)"
+            }
+
+        return {'close_partial': False}
+
     def should_close_by_timeout(self, trade: Dict) -> bool:
         """
         Verifica se una posizione ha superato il timeout (15 minuti).

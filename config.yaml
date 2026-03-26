@@ -41,36 +41,31 @@ alpaca:
 # Il bot seleziona automaticamente i migliori asset del giorno
 # ------------------------------------------------------------
 assets:
-  # Priorità 1: ETF Indici + Settoriali (diversificazione, trend solidi)
+  # Crypto-only scalping H24 su €2500
   etf:
     enabled: false
-    symbols: ["SPY", "QQQ", "IWM", "XLK", "XLV", "XLF", "GLD"]
+    symbols: []
 
-  # Priorità 2: Azioni ad alta liquidità (quality only) - 4 STOCKS
+  # Azioni disabilitate - focus su crypto
   stocks:
-    enabled: true
-    symbols: [
-      "NVDA",     # NVIDIA - AI boom, altissima volatilità, volume eccezionale
-      "TSLA",     # Tesla - alta volatilità, spread basso
-      "AMD",      # AMD - semiconduttori, alta volatilità
-      "SPY"       # S&P 500 ETF - benchmark diversificazione
-    ]
+    enabled: false
+    symbols: []
 
-  # Priorità 3: Crypto (24/7, alta volatilità, trend forti)
-  # TOP 4 per volume, spread basso, liquidity alta su Alpaca
+  # Crypto ONLY - 6 asset top per volume, liquidity, spread
+  # Alpaca offre spread bassissimi su questi asset
   crypto:
     enabled: true
     symbols: [
-      "BTC/USD",    # Bitcoin - massimo volume globale
-      "ETH/USD",    # Ethereum - volume eccezionale
-      "SOL/USD",    # Solana - high volatility + spread basso
-      "XRP/USD"     # Ripple - volume eccezionale, spread stretto
+      "BTC/USD",    # Bitcoin - Vol massimo globale, spread 0.01-0.03%
+      "ETH/USD",    # Ethereum - Vol eccellente, spread 0.02-0.05%
+      "SOL/USD",    # Solana - Alta volatilità intraday, spread accettabile
+      "BNB/USD",    # Binance Coin - Volume solido, spread stretto
+      "XRP/USD",    # Ripple - Volume alto, spread stretto
+      "AVAX/USD"    # Avalanche - Buona volatilità, spread ok nelle ore peak
     ]
 
-  # Numero massimo di asset da analizzare contemporaneamente
-  # WHITELIST: 8 asset totali (4 crypto + 4 stocks) per qualità superiore
-  # Quality over quantity: ridurre slippage, aumentare profitti netti
-  max_assets_per_cycle: 8
+  # Max 6 asset per ciclo (tutti analizzati ogni volta)
+  max_assets_per_cycle: 6
 
 # ------------------------------------------------------------
 # FINESTRE ORARIE OPERATIVE (ora italiana)
@@ -82,12 +77,6 @@ trading_hours:
     - start: "00:01"
       end: "23:59"
       description: "Crypto H24 Scalping"
-
-    # Azioni: solo orario mercato USA
-    # 15:30 - 22:00 Italia = 09:30 - 16:00 USA (orario ufficiale)
-    - start: "15:30"
-      end: "22:00"
-      description: "US Stock Market Hours (09:30-16:00 EST)"
 
   # Nessuna pausa speciale (crypto H24)
   avoid: []
@@ -195,6 +184,34 @@ strategy_sentiment:
   bearish_threshold: -0.1  # Minimo momentum bearish
 
 # ------------------------------------------------------------
+# STRATEGIA 5: RSI DIVERGENCE SCALPING (1min)
+# Rileva divergenze RSI (bullish: price LL + RSI HL)
+# ------------------------------------------------------------
+strategy_rsi_divergence:
+  enabled: true
+  rsi_period: 14
+  pivot_lookback: 5
+  min_divergence_strength: 3.0  # punti RSI minimo
+
+# ------------------------------------------------------------
+# STRATEGIA 6: S/R BOUNCE SCALPING (1min su 1h levels)
+# Identifica supporti/resistenze e attende bounce con conferma
+# ------------------------------------------------------------
+strategy_sr_bounce:
+  enabled: true
+  proximity_pct: 0.0015    # 0.15% dal livello
+  mfi_period: 9
+  volume_multiplier: 1.5
+  min_wick_ratio: 2.0      # wick minimo 2x il body per candela rigetto
+
+# ------------------------------------------------------------
+# STRATEGIA 7: MTF CONFLUENCE (Multi-Timeframe)
+# Genera segnale quando 1h, 15m, 1m sono allineati
+# Peso massimo nel voting (2.0x)
+# ------------------------------------------------------------
+strategy_mtf_confluence:
+  enabled: true
+
 # API ESTERNE PER NEWS
 # Ottieni chiavi gratuite su: newsapi.org, alphavantage.co
 # ------------------------------------------------------------
@@ -238,14 +255,17 @@ risk_management:
   # Stop loss iniziale dal prezzo di entrata (SCALPING: strettissimo)
   stop_loss_pct: 0.005          # -0.5%
 
-  # Take profit dal prezzo di entrata (SCALPING: piccoli guadagni)
-  take_profit_pct: 0.010        # +1.0% (ratio 1:2)
+  # Take profit PARZIALE: 2-tier close strategy
+  take_profit_1_pct: 0.008      # TP1: +0.8% (chiudi 50% posizione)
+  take_profit_2_pct: 0.015      # TP2: +1.5% (chiudi restante 50%)
+  take_profit_1_atr_multiplier: 2.0   # TP1 = 2×ATR (alternativa a % fisso)
+  take_profit_2_atr_multiplier: 4.0   # TP2 = 4×ATR (alternativa a % fisso)
 
-  # Trailing stop (attivazione a +1%, distanza 0.3%)
+  # Trailing stop (attivazione a +0.6%, distanza 0.3%)
   trailing_stop:
     enabled: true
-    activation_pct: 0.01        # Si attiva quando profitto >= +1%
-    trail_pct: 0.003            # Distanza trailing stop 0.3%
+    activation_pct: 0.006       # Attiva dopo +0.6% (ridotto da 1%)
+    trail_pct: 0.003            # Distanza 0.3%
 
   # Break-even automatico (attiva a +0.7% profitto)
   break_even:
@@ -267,8 +287,8 @@ risk_management:
   quality_filters:
     max_spread_pct: 0.0005      # Skip se spread > 0.05% (più stringente)
     min_volume_ratio: 1.3       # Skip se volume < 130% della media
-    cooldown_after_loss_sec: 120  # 2 minuti dopo SL
-    max_position_duration_min: 15  # Timeout posizione a 15 min
+    cooldown_after_loss_sec: 180  # 3 minuti dopo SL (ridotto da 2)
+    max_position_duration_min: 10  # Timeout posizione a 10 min (ridotto da 15)
 
   # Position sizing (4 posizioni max, 25% per posizione)
   sizing:
