@@ -5,7 +5,7 @@
 # ============================================================
 
 import logging
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import Optional, Dict, List
 from zoneinfo import ZoneInfo
 
@@ -358,12 +358,13 @@ class RiskManager:
 
         try:
             created = datetime.fromisoformat(trade['created_at'])
-            now = datetime.now(IT_TZ) if created.tzinfo else datetime.now()
 
+            # Normalizza created se naive (senza timezone)
             if created.tzinfo is None:
-                created = created.replace(tzinfo=IT_TZ)
-            elif now.tzinfo is None:
-                now = datetime.now(IT_TZ)
+                created = created.replace(tzinfo=timezone.utc)
+
+            # Usa UTC per il timestamp corrente
+            now = datetime.now(timezone.utc)
 
             duration = now - created
             timeout_exceeded = duration > timedelta(minutes=self.max_position_duration_min)
@@ -390,7 +391,7 @@ class RiskManager:
         if self._last_stop_loss_time is None:
             return False
 
-        now = datetime.now(IT_TZ)
+        now = datetime.now(timezone.utc)
         elapsed = (now - self._last_stop_loss_time).total_seconds()
         in_cooldown = elapsed < self.cooldown_after_loss_sec
 
@@ -401,7 +402,7 @@ class RiskManager:
 
     def set_stop_loss_cooldown(self):
         """Registra lo stop loss corrente per avviare il cooldown."""
-        self._last_stop_loss_time = datetime.now(IT_TZ)
+        self._last_stop_loss_time = datetime.now(timezone.utc)
         logger.info(f"Cooldown attivato per {self.cooldown_after_loss_sec}sec")
 
     # ----------------------------------------------------------------
@@ -504,7 +505,7 @@ class RiskManager:
             Dizionario con should_pause, pause_until
         """
         if weekly_pnl_pct <= -self.max_weekly_loss:
-            pause_until = datetime.now(IT_TZ) + timedelta(days=self.pause_days)
+            pause_until = datetime.now(timezone.utc) + timedelta(days=self.pause_days)
             self._paused_until = pause_until
 
             logger.warning(
@@ -525,7 +526,7 @@ class RiskManager:
         """Verifica se il bot è in pausa."""
         if self._paused_until is None:
             return False
-        return datetime.now(IT_TZ) < self._paused_until
+        return datetime.now(timezone.utc) < self._paused_until
 
     def get_pause_end_time(self) -> Optional[datetime]:
         """Restituisce quando finisce la pausa."""
@@ -597,7 +598,7 @@ class RiskManager:
 
     def should_force_close(self, force_close_time: str = "23:58") -> bool:
         """Verifica se è l'ora di chiusura forzata."""
-        now = datetime.now(IT_TZ)
+        now = datetime.now(timezone.utc)
         close_time = datetime.strptime(force_close_time, "%H:%M").time()
         return now.time() >= close_time
 
@@ -611,7 +612,7 @@ class RiskManager:
         capital_at_risk_pct = total_at_risk / capital if capital > 0 else 0
 
         return {
-            'timestamp': datetime.now().isoformat(),
+            'timestamp': datetime.now(timezone.utc).isoformat(),
             'total_capital': capital,
             'open_positions_count': len(open_positions),
             'max_positions': self.max_open_positions,

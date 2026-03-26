@@ -28,6 +28,7 @@ from bot.news_analyzer import NewsAnalyzer
 from bot.meta_strategy import MetaStrategy
 from bot.ml_filter import MLFilter
 from bot.notifications import TelegramNotifier
+from bot.status_updater import StatusUpdater
 from bot.regime_detector import RegimeDetector
 from bot.correlation_guard import CorrelationGuard
 from bot.session_scorer import SessionScorer
@@ -130,6 +131,9 @@ class TradingEngine:
         # self.notifier = TelegramNotifier(self.config)
         self.notifier = None  # Disabilitato localmente
 
+        # Status Updater (aggiorna bot_status.json per dashboard)
+        self.status_updater = StatusUpdater(self.config)
+
         # ---- NUOVI MODULI (8 Modifiche) ----
         # Regime Detector (classifica mercato TRENDING/RANGING/UNDEFINED)
         self.regime_detector = RegimeDetector(self.config)
@@ -208,10 +212,8 @@ class TradingEngine:
         logger.info(f"Capitale virtuale: €{capital_eur} = ${self._virtual_capital:.2f} USD")
         logger.info(f"(Account Alpaca paper: $100,000 — usato solo come esecutore ordini)")
 
-        # Notifica avvio
-        if self.notifier:
-            if self.notifier:
-                self.notifier.notify_bot_status('started')
+        # Notifica avvio (aggiorna dashboard status)
+        self.status_updater.update_status('started')
 
         # Segna data inizio paper trading
         if self.config['trading']['mode'] == 'paper':
@@ -258,17 +260,14 @@ class TradingEngine:
                 logger.info(f"Chiusura {len(open_positions)} posizioni aperte...")
                 self.broker.close_all_positions()
 
-        if self.notifier:
-            self.notifier.notify_bot_status('stopped')
+        self.status_updater.update_status('stopped')
         logger.info("Bot fermato")
 
     def pause(self):
         """Mette il bot in pausa (senza chiudere posizioni)."""
         self.paused = True
         logger.info("Bot messo in pausa")
-        if self.notifier:
-            if self.notifier:
-                self.notifier.notify_bot_status('paused', 'Pausa manuale')
+        self.status_updater.update_status('paused', 'Pausa manuale')
 
     def resume(self):
         """Riprende il bot dalla pausa."""
@@ -295,9 +294,9 @@ class TradingEngine:
         """
         now = datetime.now(IT_TZ)
 
-        # --- FASE 1: Verifica chiusura forzata ---
-        force_close_time = self.config['trading'].get('force_close_time', '21:45')
-        if self.risk_manager.should_force_close(force_close_time):
+        # --- FASE 1: Verifica chiusura forzata (solo se configurata) ---
+        force_close_time = self.config['trading'].get('force_close_time', None)
+        if force_close_time and self.risk_manager.should_force_close(force_close_time):
             logger.info("FASE 1: Chiusura forzata - ciclo saltato")
             open_trades = self.db.get_open_trades()
             if open_trades:
@@ -333,8 +332,9 @@ class TradingEngine:
         best_assets_temp = self._select_best_assets()
         if best_assets_temp:
             try:
-                df_1min = self.broker.get_recent_bars(best_assets_temp[0], '1m', 50)
-                regime_info = self.regime_detector.detect_regime(df_1min)
+                # Recupera 200 candele 1min da BTC/USD per regime detection accurato
+                df_regime = self.broker.get_recent_bars("BTC/USD", '1m', 200)
+                regime_info = self.regime_detector.detect_regime(df_regime)
                 self._current_regime = regime_info
 
                 # Costruisci la stringa delle strategie attive
@@ -587,6 +587,17 @@ class TradingEngine:
         final_signal = vote_result['final_signal']
         vote_score = vote_result['vote_score']
 
+        # Log dei singoli voti delle 4 strategie (per visibilità VWAP)
+        votes = vote_result.get('votes', {})
+        logger.info(
+            f"[{symbol}] Voti strategie: "
+            f"EMA={votes.get('confluence', 'HOLD')} | "
+            f"BB={votes.get('breakout', 'HOLD')} | "
+            f"VWAP={votes.get('sentiment', 'HOLD')} | "
+            f"LIQ={votes.get('liquidity', 'HOLD')} → "
+            f"FINALE: {final_signal}"
+        )
+
         # Salva i segnali nel database (4 strategie)
         for signal, name in [(signal_1, 'confluence'), (signal_2, 'breakout'), (signal_3, 'sentiment'), (signal_4, 'liquidity')]:
             self.db.insert_signal({
@@ -598,7 +609,9 @@ class TradingEngine:
             })
 
         # Se non c'è segnale operativo, esci
-        if final_signal == 'HOLD' or abs(vote_score) < 2:
+        # NOTA: Fidati del segnale finale del meta_strategy — ha già valutato min_score e regime
+        # Non ri-valutare abs(vote_score) < 2 qui (appartiene al meta_strategy)
+        if final_signal == 'HOLD':
             logger.debug(f"[{symbol}] HOLD - {vote_result['reason']}")
             return
 
@@ -767,7 +780,9 @@ class TradingEngine:
                 'take_profit': take_profit,
                 'alpaca_order_id': order.get('order_id'),
                 'ml_confidence': ml_result.get('confidence'),
-                'vote_score': vote_result.get('buy_votes', 0)
+                'vote_score': vote_result.get('buy_votes', 0),
+                'regime_at_entry': self._current_regime.get('regime', 'UNDEFINED'),
+                'confidence': vote_result.get('avg_confidence', 0)
             })
 
             # Notifica Telegram
@@ -1066,8 +1081,7 @@ class TradingEngine:
             self.notifier.send_weekly_report(report_data)
 
         if weekly_check.get('should_pause'):
-            if self.notifier:
-                self.notifier.notify_bot_status(
+            self.status_updater.update_status(
                 'paused',
                 f"Perdite settimanali eccessive: {weekly_pnl_pct:.2%}"
             )

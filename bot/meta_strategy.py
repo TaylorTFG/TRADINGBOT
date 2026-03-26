@@ -205,14 +205,24 @@ class MetaStrategy:
         sell_votes = sum(1 for v in votes.values() if v == 'SELL')
         hold_votes = sum(1 for v in votes.values() if v == 'HOLD')
 
-        # Determina il segnale finale (logica per 4 strategie)
+        # Determina il segnale finale
         final_signal = 'HOLD'
         vote_score = 0
         size_type = 'none'
         action = 'none'
         reason = ''
 
+        # Determina soglia minima di voti richiesti in base al regime
+        # In regime TRENDING: 2 strategie attive (EMA + VWAP) → min_score_trending = 1
+        # Altrimenti: 4 strategie attive → min_score = 2
+        min_score_threshold = 2
+        if regime_info and regime_info.get('regime') == 'TRENDING':
+            # In TRENDING, solo EMA e VWAP votano
+            min_score_threshold = 1
+            logger.debug(f"[{symbol}] Regime TRENDING: min_score_threshold abbassato a 1")
+
         # Con 4 strategie: 3/4 o 4/4 = full, 2/4 = half, <2 = HOLD
+        # Con 2 strategie (TRENDING): 2/2 = full, 1/2 = half, <1 = HOLD
         if buy_votes >= 3:
             final_signal = 'BUY'
             vote_score = buy_votes
@@ -227,6 +237,14 @@ class MetaStrategy:
             action = 'open_half'
             reason = f'{buy_votes}/4 strategie concordano BUY → entrata con size ridotta'
 
+        elif buy_votes == 1 and min_score_threshold == 1:
+            # In regime TRENDING: solo 1 strategia BUY (EMA o VWAP) → trade con size minore
+            final_signal = 'BUY'
+            vote_score = 1
+            size_type = 'half'  # 1.25% capitale - cautela con consenso minimo
+            action = 'open_half'
+            reason = f'Regime TRENDING: {buy_votes}/2 strategie BUY → entrata cautela'
+
         elif sell_votes >= 3:
             final_signal = 'SELL'
             vote_score = -sell_votes
@@ -240,6 +258,14 @@ class MetaStrategy:
             size_type = 'half'
             action = 'close'
             reason = f'{sell_votes}/4 strategie concordano SELL → considera uscita'
+
+        elif sell_votes == 1 and min_score_threshold == 1:
+            # In regime TRENDING: 1 strategia SELL → uscita cautela
+            final_signal = 'SELL'
+            vote_score = -1
+            size_type = 'half'
+            action = 'close'
+            reason = f'Regime TRENDING: {sell_votes}/2 strategie SELL → uscita cautela'
 
         elif sell_votes == 1:
             final_signal = 'HOLD'

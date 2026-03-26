@@ -57,9 +57,8 @@ st.markdown("""
 # UTILITY FUNCTIONS
 # ============================================================
 
-@st.cache_resource
 def get_database():
-    """Connessione al database."""
+    """Connessione al database - NO CACHE per refresh real-time."""
     config = load_config()
     db_path = config.get('database', {}).get('path', 'data/trades.db')
     if Path(db_path).exists():
@@ -726,20 +725,17 @@ def main():
     elif page == "🎯 Advanced Metrics":
         page_analytics()
 
-    # Auto-refresh
+    # Auto-refresh - Usa st.rerun() di Streamlit
     st.sidebar.divider()
     st.sidebar.write("⚙️ Dashboard")
-    refresh_interval = st.sidebar.selectbox("Refresh", [5, 10, 30, 60], index=1, key="refresh")
+    refresh_interval = st.sidebar.selectbox("Refresh", [5, 10, 30, 60], index=1, key="refresh_select")
 
     if refresh_interval:
         st.write(f"_Dashboard auto-refresh ogni {refresh_interval}s_")
-        st.markdown(f"""
-        <script>
-            setTimeout(function() {{
-                location.reload();
-            }}, {refresh_interval * 1000});
-        </script>
-        """, unsafe_allow_html=True)
+        # Usa time.sleep + st.rerun() per refresh automatico (migliore di location.reload)
+        import time
+        time.sleep(refresh_interval)
+        st.rerun()
 
 
 def page_trades():
@@ -789,65 +785,16 @@ def page_trades():
 
     st.divider()
 
-    # ---- SEZIONE 2: STORICO TRADE ----
-    st.subheader("📊 Storico Trade")
+    # ---- SEZIONE 2: STORICO TRADE DETTAGLIATO ----
+    st.subheader("📊 Storico Trade (Dettagli Completi)")
 
     try:
-        all_trades = db.get_trade_history(limit=100)
+        all_trades = db.get_trade_history(limit=50)  # Limitato a 50 per performance
 
         if not all_trades:
             st.info("Nessun trade nel database")
         else:
-            # Prepara dataframe per visualizzazione
-            trades_data = []
-            for trade in all_trades:
-                side = trade.get('side', 'BUY').upper()
-                entry_price = trade.get('entry_price', 0)
-                exit_price = trade.get('exit_price') or 'OPEN'
-                pnl = trade.get('pnl', 0)
-                pnl_pct = trade.get('pnl_pct', 0)
-                status = trade.get('status', 'unknown').upper()
-
-                # Calcola se è profit o loss
-                if status == 'CLOSED':
-                    pnl_color = "🟢" if pnl >= 0 else "🔴"
-                    pnl_str = f"{pnl_color} ${pnl:+.2f} ({pnl_pct*100:+.2f}%)"
-                else:
-                    pnl_str = "🔵 OPEN"
-
-                trades_data.append({
-                    'Symbol': trade.get('symbol', 'N/A'),
-                    'Side': side,
-                    'Entry': f"${entry_price:.2f}",
-                    'Exit': f"${exit_price:.2f}" if isinstance(exit_price, float) else exit_price,
-                    'Qty': f"{trade.get('quantity', 0):.4f}",
-                    'P&L': pnl_str,
-                    'Entry Time': trade.get('entry_time', 'N/A')[:19],
-                    'Exit Time': trade.get('exit_time', '-')[:19] if trade.get('exit_time') else '-',
-                    'Entry Reason': trade.get('entry_reason', 'N/A')[:50],
-                    'Exit Reason': trade.get('exit_reason', '-')[:50] if trade.get('exit_reason') else '-',
-                    'Strategy': trade.get('strategy', 'N/A'),
-                    'Status': status,
-                })
-
-            df_trades = pd.DataFrame(trades_data)
-
-            # Mostri con colori
-            st.dataframe(
-                df_trades,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "P&L": st.column_config.TextColumn(width="medium"),
-                    "Entry Reason": st.column_config.TextColumn(width="medium"),
-                    "Exit Reason": st.column_config.TextColumn(width="medium"),
-                }
-            )
-
-            # Statistiche
-            st.divider()
-            st.subheader("📈 Statistiche Sessione")
-
+            # Statistiche rapide
             closed_trades = [t for t in all_trades if t.get('status') == 'closed']
             if closed_trades:
                 wins = len([t for t in closed_trades if t.get('pnl', 0) > 0])
@@ -857,7 +804,6 @@ def page_trades():
                 win_rate = (wins / len(closed_trades) * 100) if closed_trades else 0
 
                 col1, col2, col3, col4, col5 = st.columns(5)
-
                 with col1:
                     st.metric("Trade Chiusi", len(closed_trades))
                 with col2:
@@ -868,8 +814,106 @@ def page_trades():
                     st.metric("Total P&L", f"${total_pnl:+.2f}")
                 with col5:
                     st.metric("Avg P&L", f"${avg_pnl:+.2f}")
-            else:
-                st.info("Nessun trade chiuso ancora")
+                st.divider()
+
+            # ---- LISTA TRADE ESPANDIBILE ----
+            for idx, trade in enumerate(all_trades):
+                side = trade.get('side', 'BUY').upper()
+                symbol = trade.get('symbol', 'N/A')
+                entry_price = trade.get('entry_price', 0)
+                exit_price = trade.get('exit_price', 0)
+                qty = trade.get('quantity', 0)
+                pnl = trade.get('pnl', 0)
+                pnl_pct = trade.get('pnl_pct', 0) * 100
+                status = trade.get('status', 'unknown').upper()
+                entry_time = trade.get('entry_time', 'N/A')[:19]
+                exit_time = trade.get('exit_time', '-')[:19] if trade.get('exit_time') else '-'
+
+                # Colore P&L
+                if status == 'CLOSED':
+                    pnl_emoji = "🟢" if pnl >= 0 else "🔴"
+                    pnl_str = f"{pnl_emoji} ${pnl:+.2f} ({pnl_pct:+.2f}%)"
+                else:
+                    pnl_emoji = "🔵"
+                    pnl_str = "APERTO"
+
+                # Header del trade (summary)
+                summary = f"{pnl_emoji} {symbol} | {side} {qty:.4f} @ ${entry_price:.2f} | {pnl_str} | {entry_time}"
+
+                with st.expander(summary, expanded=False):
+                    # Riga 1: Entry Details
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.write(f"**Symbol:** {symbol}")
+                    with col2:
+                        st.write(f"**Side:** {side}")
+                    with col3:
+                        st.write(f"**Qty:** {qty:.6f}")
+                    with col4:
+                        st.write(f"**Status:** {status}")
+
+                    # Riga 2: Entry & Exit Prices
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.write(f"**Entry Price:** ${entry_price:.2f}")
+                    with col2:
+                        exit_display = f"${exit_price:.2f}" if exit_price > 0 else "-"
+                        st.write(f"**Exit Price:** {exit_display}")
+                    with col3:
+                        st.write(f"**P&L:** {pnl_str}")
+                    with col4:
+                        st.write(f"**Ratio:** {(exit_price/entry_price - 1)*100:.3f}%" if exit_price > 0 else "-")
+
+                    st.divider()
+
+                    # Riga 3: Timing
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.write(f"**Entry Time:** {entry_time}")
+                    with col2:
+                        st.write(f"**Exit Time:** {exit_time}")
+                    with col3:
+                        # Calcola durata
+                        if trade.get('exit_time') and status == 'CLOSED':
+                            try:
+                                entry_dt = datetime.fromisoformat(trade.get('entry_time'))
+                                exit_dt = datetime.fromisoformat(trade.get('exit_time'))
+                                duration = exit_dt - entry_dt
+                                duration_str = f"{duration.total_seconds()/60:.1f}min"
+                            except:
+                                duration_str = "N/A"
+                        else:
+                            duration_str = "In Progress"
+                        st.write(f"**Duration:** {duration_str}")
+
+                    st.divider()
+
+                    # Riga 4: Motivi completi
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        entry_reason = trade.get('entry_reason', 'N/A')
+                        st.write(f"**📥 Entry Reason:**")
+                        st.markdown(f"> {entry_reason}")
+                    with col2:
+                        exit_reason = trade.get('exit_reason', 'N/A')
+                        st.write(f"**📤 Exit Reason:**")
+                        st.markdown(f"> {exit_reason}")
+
+                    st.divider()
+
+                    # Riga 5: Metadata (strategy, regime, ecc)
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.write(f"**Strategy:** {trade.get('strategy', 'N/A')}")
+                    with col2:
+                        st.write(f"**Regime:** {trade.get('regime_at_entry', 'N/A')}")
+                    with col3:
+                        st.write(f"**Confidence:** {trade.get('confidence', 'N/A')}")
+                    with col4:
+                        st.write(f"**ID:** {str(trade.get('id', 'N/A'))[:8]}...")
+
+    except Exception as e:
+        st.error(f"Errore caricamento storico: {e}")
 
     except Exception as e:
         st.error(f"Errore caricamento storico: {e}")

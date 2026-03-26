@@ -176,7 +176,14 @@ class ConfluenceStrategy:
         details['atr'] = f"OK ({atr_pct:.3f}%)"
 
         # ---- 2. Check: Volume (>120% media) ----
-        if volume_ratio < self.vol_multiplier:
+        # Check se volume_ratio è valido (non 0, non NaN)
+        import numpy as np
+        if (volume_ratio is None or volume_ratio == 0 or
+            np.isnan(float(volume_ratio)) if isinstance(volume_ratio, (int, float)) else False):
+            logger.warning(f"[{symbol}] Volume data missing or invalid ({volume_ratio}), skipping volume filter")
+            details['volume'] = "SKIPPED (no volume data)"
+            vol_ok = True  # Skip filter, assume OK
+        elif volume_ratio < self.vol_multiplier:
             details['volume'] = f"LOW ({volume_ratio:.2f}x media)"
             # Se volume basso, riduci score
             vol_ok = False

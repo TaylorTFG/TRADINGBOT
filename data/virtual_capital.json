@@ -1,8 +1,8 @@
 {
-  "virtual_capital": 2725.0,
+  "virtual_capital": 2724.3508606259998,
   "initial_capital": 2725.0,
   "capital_eur": 2500,
-  "total_pnl": 0.0,
-  "total_pnl_pct": 0.0,
-  "updated_at": "2026-03-25T12:03:22.429463"
+  "total_pnl": -0.6491393740002422,
+  "total_pnl_pct": -0.00023821628403678614,
+  "updated_at": "2026-03-26T15:49:32.844572"
 }

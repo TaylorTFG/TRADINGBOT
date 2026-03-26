@@ -98,8 +98,11 @@ trading_hours:
 strategy_confluence:
   enabled: true
 
-  # Soglia minima indicatori concordi per operare (su 3 strategie)
+  # Soglia minima indicatori concordi per operare (su 4 strategie)
   min_score: 2
+
+  # Soglia minima in regime TRENDING (solo 2 strategie attive: EMA + VWAP)
+  min_score_trending: 1  # Se 1 strategia vota → trade (ex: solo EMA BUY)
 
   # RSI - Relative Strength Index (periodo 7 per reattività scalping)
   rsi:
@@ -179,7 +182,7 @@ strategy_sentiment:
   # VWAP - Volume Weighted Average Price
   vwap:
     reset_daily: true  # Reset VWAP ogni inizio giornata
-    price_proximity_pct: 0.003  # Operare solo se price entro 0.3% VWAP
+    price_proximity_pct: 0.015  # Operare se price entro 1.5% VWAP (era 0.3%, troppo stretto)
 
   # MACD per momentum confirmation
   macd:
@@ -280,7 +283,7 @@ risk_management:
 market_context:
   # VIX - Volatility Index
   vix:
-    high_threshold: 30          # VIX > 30 → dimezza le size
+    high_threshold: 35          # VIX > 35 → dimezza le size (era 30, era troppo sensibile)
     enabled: true
 
   # SP500 daily drop filter
