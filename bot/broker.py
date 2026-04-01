@@ -359,46 +359,63 @@ class BrokerClient:
 
     def get_orders(self, status: str = 'open', limit: int = 100) -> Optional[List[Dict]]:
         """
-        Recupera gli ordini (open, closed, all).
+        Recupera gli ordini aperti (pending, partially filled).
 
         Args:
-            status: 'open' (pending + partial fill), 'closed', 'all'
+            status: 'open' filtra localmente, 'closed' filtra localmente
             limit: Numero massimo di ordini
 
         Returns:
             Lista di ordini o None in caso di errore
         """
         try:
-            orders = self._retry_on_error(
-                self.trading_client.get_orders,
-                status=status,
-                limit=limit
-            )
+            from alpaca.trading.enums import OrderStatus
+
+            # Alpaca API: get_orders() senza parametri ritorna tutti gli ordini
+            # Filtriamo localmente per status
+            orders = self._retry_on_error(self.trading_client.get_orders, limit=limit)
 
             if not orders:
-                logger.debug(f"Nessun ordine {status} su Alpaca")
+                logger.debug(f"Nessun ordine su Alpaca")
                 return []
 
             result = []
             for order in orders:
+                order_status = order.status.value if hasattr(order.status, 'value') else str(order.status)
+
+                # Filtra per status (open = NEW, PARTIALLY_FILLED, PENDING_NEW, etc.)
+                if status == 'open':
+                    # Considera open: new, partially_filled, pending_new, accepted, pending_cancel, pending_replace
+                    open_statuses = ['new', 'partially_filled', 'pending_new', 'accepted', 'pending_cancel', 'pending_replace']
+                    if order_status.lower() not in open_statuses:
+                        continue
+                elif status == 'closed':
+                    # Considera closed: filled, canceled, expired, rejected
+                    closed_statuses = ['filled', 'canceled', 'expired', 'rejected', 'done_for_day']
+                    if order_status.lower() not in closed_statuses:
+                        continue
+
                 order_dict = {
                     'order_id': str(order.id),
                     'symbol': order.symbol,
-                    'side': order.side.value if order.side else 'unknown',
+                    'side': order.side.value if hasattr(order.side, 'value') else str(order.side),
                     'qty': float(order.qty) if order.qty else 0,
-                    'status': order.status.value if order.status else 'unknown',
+                    'status': order_status,
                     'filled_qty': float(order.filled_qty) if order.filled_qty else 0,
                     'filled_avg_price': float(order.filled_avg_price) if order.filled_avg_price else None,
                     'created_at': str(order.created_at),
                 }
                 result.append(order_dict)
-                logger.debug(f"Ordine: {order_dict['symbol']} {order_dict['side']} {order_dict['qty']} → {order_dict['status']}")
+                logger.debug(
+                    f"Ordine open: {order_dict['symbol']} {order_dict['side']} "
+                    f"{order_dict['qty']} qty (fill={order_dict['filled_qty']}) → {order_status}"
+                )
 
             logger.info(f"Recuperati {len(result)} ordini {status} da Alpaca")
             return result
         except Exception as e:
-            logger.error(f"Errore recupero ordini {status}: {e}", exc_info=True)
-            return None
+            logger.error(f"Errore recupero ordini: {e}", exc_info=True)
+            return []
 
     def cancel_order(self, order_id: str) -> bool:
         """
