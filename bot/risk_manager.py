@@ -633,10 +633,19 @@ class RiskManager:
             Dizionario con can_open, reason
         """
         # Max posizioni: 2
-        if len(open_positions) >= self.max_open_positions:
+        # Filtra: non contare trade senza entry_price (incomplete/zombie)
+        valid_positions = [
+            p for p in open_positions
+            if p.get('entry_price') and p.get('quantity') and p.get('quantity') > 0
+        ]
+        if len(valid_positions) >= self.max_open_positions:
+            logger.warning(
+                f"Max posizioni raggiunte: {len(valid_positions)}/{self.max_open_positions} "
+                f"(filtered da {len(open_positions)} DB trades)"
+            )
             return {
                 'can_open': False,
-                'reason': f'Max {self.max_open_positions} posizioni aperte'
+                'reason': f'Max {self.max_open_positions} posizioni aperte (attivi: {len(valid_positions)})'
             }
 
         # Non aprire su stessa coppia
