@@ -227,23 +227,24 @@ class SessionScorer:
                 return 50.0
 
             # Calcola win rate odierno
-            wins = len([t for t in today_trades if t.get('pnl', 0) > 0])
-            today_wr = wins / len(today_trades) if today_trades else 0.0
+            today_wr = len([t for t in today_trades if (t.get('pnl') or 0) > 0]) / max(len(today_trades), 1)
 
             # Prendi media storica (ultimi 60 giorni)
             if all_trades:
-                hist_wins = len([t for t in all_trades if t.get('pnl', 0) > 0])
-                hist_wr = hist_wins / len(all_trades)
+                hist_wr = len([t for t in all_trades if (t.get('pnl') or 0) > 0]) / max(len(all_trades), 1)
             else:
                 hist_wr = 0.5
 
             # Calcola percentile
             # Se today_wr > hist_wr, score aumenta
             # Se today_wr < hist_wr, score diminuisce
-            if hist_wr > 0:
-                percentile = (today_wr / hist_wr) * 100
-                percentile = min(100, percentile)  # Cap a 100
-            else:
+            try:
+                if hist_wr > 0:
+                    percentile = (today_wr / hist_wr) * 100
+                    percentile = min(100, percentile)  # Cap a 100
+                else:
+                    percentile = 50.0
+            except (TypeError, ZeroDivisionError):
                 percentile = 50.0
 
             return percentile

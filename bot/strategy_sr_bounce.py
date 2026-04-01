@@ -147,6 +147,12 @@ class SRBounceStrategy:
         mfi = self.calculate_mfi(df_1m, self.mfi_period)
         last = df_1m.iloc[-1]
 
+        # Filtra: supports devono essere SOTTO il prezzo corrente
+        valid_supports = [s for s in sr['supports'] if s < current * 0.999]
+        valid_resistances = [r for r in sr['resistances'] if r > current * 1.001]
+        sr['supports'] = valid_supports
+        sr['resistances'] = valid_resistances
+
         # Volume check
         vol_ma = df_1m['volume'].rolling(10).mean().iloc[-1]
         vol_ratio = float(df_1m['volume'].iloc[-1]) / max(vol_ma, 1e-10)

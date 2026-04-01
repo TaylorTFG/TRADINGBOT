@@ -51,7 +51,7 @@ assets:
     enabled: false
     symbols: []
 
-  # Crypto ONLY - 6 asset top per volume, liquidity, spread
+  # Crypto ONLY - 5 asset top per volume, liquidity, spread
   # Alpaca offre spread bassissimi su questi asset
   crypto:
     enabled: true
@@ -59,7 +59,6 @@ assets:
       "BTC/USD",    # Bitcoin - Vol massimo globale, spread 0.01-0.03%
       "ETH/USD",    # Ethereum - Vol eccellente, spread 0.02-0.05%
       "SOL/USD",    # Solana - Alta volatilità intraday, spread accettabile
-      "BNB/USD",    # Binance Coin - Volume solido, spread stretto
       "XRP/USD",    # Ripple - Volume alto, spread stretto
       "AVAX/USD"    # Avalanche - Buona volatilità, spread ok nelle ore peak
     ]

@@ -216,6 +216,9 @@ class TradingEngine:
         logger.info(f"Capitale virtuale: €{capital_eur} = ${self._virtual_capital:.2f} USD")
         logger.info(f"(Account Alpaca paper: $100,000 — usato solo come esecutore ordini)")
 
+        # Sincronizza posizioni DB con Alpaca
+        self._sync_positions_with_alpaca()
+
         # Notifica avvio (aggiorna dashboard status)
         self.status_updater.update_status('started')
 
@@ -1068,6 +1071,21 @@ class TradingEngine:
         logger.info(f"Prima esecuzione — capitale virtuale inizializzato: ${self._initial_virtual_capital:.2f}")
         self._save_virtual_capital()
         return self._initial_virtual_capital
+
+    def _sync_positions_with_alpaca(self):
+        """Allinea posizioni DB con quelle reali su Alpaca."""
+        try:
+            db_open = self.db.get_open_trades()
+            alpaca_positions = {p['symbol'].replace('/', '') for p in self.broker.get_positions()}
+
+            for trade in db_open:
+                symbol_alpaca = trade['symbol'].replace('/', '')
+                if symbol_alpaca not in alpaca_positions:
+                    exit_price = self.broker.get_latest_price(trade['symbol']) or trade['entry_price']
+                    self.db.close_trade(trade['id'], exit_price, 'Startup sync: position not found on Alpaca')
+                    logger.warning(f"[STARTUP SYNC] Closed ghost position: {trade['symbol']}")
+        except Exception as e:
+            logger.error(f"Errore sync posizioni Alpaca: {e}")
 
     # ----------------------------------------------------------------
     # TASK SCHEDULATI
