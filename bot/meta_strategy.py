@@ -112,13 +112,13 @@ class MetaStrategy:
         if regime_info:
             regime = regime_info.get('regime', 'UNDEFINED')
             if regime == 'TRENDING':
-                min_weighted_score = 1.5
+                min_weighted_score = 1.2  # MTF(2.0) + EMA(1.0) = 3.2, ma anche solo MTF(2.0) >= 1.2
             elif regime == 'RANGING':
-                min_weighted_score = 1.5
+                min_weighted_score = 1.0  # BB(0.8) + SR(1.0) = 1.8 >= 1.0; singolo SR(1.0) >= 1.0
             else:  # UNDEFINED
-                min_weighted_score = 2.5
+                min_weighted_score = 2.0  # Ridotto da 2.5 per più opportunità
         else:
-            min_weighted_score = 2.5
+            min_weighted_score = 2.0
 
         # Determina il segnale finale
         final_signal = 'HOLD'

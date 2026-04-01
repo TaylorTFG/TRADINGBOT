@@ -77,11 +77,11 @@ class KellySizing:
             # Prendi ultimi 30 trade chiusi
             trades = self.db.get_trade_history(limit=30)
 
-            # Escludi trade con |pnl| > 3x del TP atteso (ghost positions)
-            max_normal_pnl = self.config.get('risk_management', {}).get('take_profit_pct', 0.01) * 2725 * 0.25 * 10
-            trades = [t for t in trades if abs(t.get('pnl', 0)) < max_normal_pnl]
+            # Escludi trade con |pnl| > $5 (chiaramente anomalo)
+            max_normal_pnl = 5.0
+            trades = [t for t in trades if t.get('pnl') is not None and abs(t.get('pnl', 0)) <= max_normal_pnl]
 
-            if not trades or len(trades) < 5:
+            if not trades or len(trades) < 10:
                 # Insufficienti dati: usa default conservativo
                 return {
                     'kelly_fraction': 0.0,

@@ -393,7 +393,7 @@ class TradingEngine:
             except Exception as e:
                 logger.error(f"Errore analisi {symbol}: {e}", exc_info=True)
 
-        # --- CICLO COMPLETATO: Summary Log ---
+        # --- CICLO COMPLETATO: Summary Log con moltiplicatori ---
         open_count = len(self.db.get_open_trades())
         today_stats = self.db.get_today_stats()
         trades_today = today_stats.get('total_trades', 0) or 0
@@ -401,10 +401,18 @@ class TradingEngine:
         win_count = today_stats.get('winning', 0) or 0
         loss_count = today_stats.get('losing', 0) or 0
 
+        # Calcola moltiplicatori attuali per diagnostica
+        vix_mult = self.market_context.get_size_multiplier()
+        kelly_info = self.kelly_sizing.calculate_kelly_fraction()
+        kelly_mult = kelly_info.get('position_size_pct', 0.15) / 0.15
+        session_mult = self._session_size_multiplier
+
         logger.info(
-            f"CICLO COMPLETATO | Open={open_count} | Trades oggi={trades_today} | "
-            f"P&L oggi=${pnl_today:+.2f} | Win={win_count} Loss={loss_count} | "
-            f"Capitale=${current_capital:.2f}"
+            f"CICLO | Open={open_count}/2 | Trades={trades_today} | "
+            f"P&L={pnl_today:+.2f}$ | W={win_count} L={loss_count} | "
+            f"Cap=${current_capital:.2f} | "
+            f"Sizing: VIX={vix_mult:.1f}× Kelly={kelly_mult:.2f}× Sess={session_mult:.1f}× "
+            f"→ {vix_mult*kelly_mult*session_mult:.2f}× totale"
         )
 
     # ----------------------------------------------------------------
@@ -574,6 +582,32 @@ class TradingEngine:
             logger.debug(f"[{symbol}] Errore regime detection: {e}")
             asset_regime = {'regime': 'UNDEFINED', 'strategy_mask': [True]*6}
 
+        # ---- FILTRO TREND 1H: blocca BUY se asset in downtrend 1h ----
+        trend_1h = 'NEUTRAL'
+        if df_1h is not None and len(df_1h) >= 50:
+            try:
+                close_1h = df_1h['close']
+                ema20_1h = float(close_1h.ewm(span=20).mean().iloc[-1])
+                ema50_1h = float(close_1h.ewm(span=50).mean().iloc[-1])
+                current_close_1h = float(close_1h.iloc[-1])
+
+                if current_close_1h > ema20_1h and ema20_1h > ema50_1h:
+                    trend_1h = 'BULLISH'
+                elif current_close_1h < ema20_1h and ema20_1h < ema50_1h:
+                    trend_1h = 'BEARISH'
+                else:
+                    trend_1h = 'NEUTRAL'
+
+                logger.debug(f"[{symbol}] Trend 1h: {trend_1h} (C={current_close_1h:.2f}, EMA20={ema20_1h:.2f}, EMA50={ema50_1h:.2f})")
+            except Exception as e:
+                logger.debug(f"[{symbol}] Errore calcolo trend 1h: {e}")
+                trend_1h = 'NEUTRAL'
+
+        # Cache per uso in monitoring
+        if not hasattr(self, '_trend_1h_cache'):
+            self._trend_1h_cache = {}
+        self._trend_1h_cache[symbol] = trend_1h
+
         # Calcola indicatori tecnici su df_1m (non 5m)
         df_with_indicators = self.strategy_confluence.calculate_indicators(df_1m)
         if df_with_indicators is None:
@@ -720,6 +754,12 @@ class TradingEngine:
 
         # --- Esecuzione Ordine ---
         if final_signal == 'BUY':
+            # Filtro trend 1h: non comprare se trend 1h è BEARISH
+            trend = self._trend_1h_cache.get(symbol, 'NEUTRAL') if hasattr(self, '_trend_1h_cache') else 'NEUTRAL'
+            if trend == 'BEARISH':
+                logger.info(f"[{symbol}] BUY bloccato: trend 1h BEARISH (EMA20 < EMA50)")
+                return
+
             self._execute_buy(
                 symbol=symbol,
                 qty=position_size['qty'],
@@ -895,6 +935,37 @@ class TradingEngine:
                     logger.info(f"[{symbol}] TAKE PROFIT raggiunto a ${current_price:.2f}")
                     self._close_position(symbol, trade, "Take profit")
                     continue
+
+                # Check break-even automatico
+                be_stop = self.risk_manager.check_break_even(trade, current_price)
+                if be_stop and be_stop > trade.get('stop_loss', 0):
+                    self.db.update_trade_stop(trade['id'], be_stop)
+                    logger.info(f"[{symbol}] Break-even attivato: SL → ${be_stop:.4f}")
+
+                # ---- USCITA ANTICIPATA SE SEGNALE SI INVERTE ----
+                # Calcola rapidamente se il MTF Confluence si è invertito
+                try:
+                    df_1m_quick = self.broker.get_recent_bars(symbol, '1m', 50)
+                    df_15m_quick = self.broker.get_recent_bars(symbol, '15m', 30)
+                    df_1h_quick = self.broker.get_recent_bars(symbol, '1h', 50)
+
+                    if df_1m_quick is not None and df_15m_quick is not None and df_1h_quick is not None:
+                        mtf_check = self.strategy_mtf_confluence.analyze(
+                            df_1m_quick, df_15m_quick, df_1h_quick, symbol
+                        )
+                        trade_side = trade.get('side', 'buy')
+                        pnl_current = (current_price - trade['entry_price']) * trade['quantity']
+
+                        # Uscita anticipata se MTF si inverte E siamo in perdita
+                        if (trade_side == 'buy' and
+                            mtf_check.get('signal') == 'SELL' and
+                            mtf_check.get('score', 0) >= 2 and
+                            pnl_current < 0):
+                            logger.info(f"[{symbol}] Uscita anticipata: MTF invertito in SELL, PnL={pnl_current:.2f}")
+                            self._close_position(symbol, trade, "MTF signal reversal (early exit)")
+                            continue
+                except Exception as e:
+                    logger.debug(f"[{symbol}] Errore early exit check: {e}")
 
                 # Aggiorna trailing stop
                 new_stop = self.risk_manager.update_trailing_stop(trade, current_price)

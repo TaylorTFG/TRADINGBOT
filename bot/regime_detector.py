@@ -168,7 +168,7 @@ class RegimeDetector:
                 'adx': 20.0,
                 'choppiness': 50.0,
                 'confidence': 0.0,
-                'strategy_mask': [True, True, True, True],  # Tutti attivi
+                'strategy_mask': [True, True, True, True, True, True],  # Tutti attivi (6 elementi)
                 'timestamp': datetime.now().isoformat(),
                 'reason': 'Dati insufficienti'
             }
@@ -178,18 +178,17 @@ class RegimeDetector:
         choppiness = self.calculate_choppiness(df_1min)
 
         # Classificazione regime
+        # Strategy order: [confluence, breakout, sentiment, rsi_divergence, sr_bounce, mtf_confluence]
         if adx > 25 and choppiness < 50:
             regime = 'TRENDING'
-            # Usa trend strategies (EMA Crossover + VWAP)
-            # Disabilita mean reversion (BB Squeeze, Liquidity Hunt)
-            strategy_mask = [True, False, True, False]
+            # TRENDING: EMA + VWAP + RSI-Div + MTF
+            strategy_mask = [True, False, True, True, False, True]
             confidence = min(0.95, (adx - 20) / 30)  # Aumenta con ADX
 
         elif adx < 20 or choppiness > 61.8:
             regime = 'RANGING'
-            # Usa mean reversion (Bollinger Squeeze SOLO)
-            # Disabilita trend strategies
-            strategy_mask = [False, True, False, False]
+            # RANGING: BB + S/R Bounce (mean reversion)
+            strategy_mask = [False, True, False, False, True, False]
             if adx < 20:
                 confidence = (20 - adx) / 20
             else:
@@ -198,8 +197,8 @@ class RegimeDetector:
 
         else:
             regime = 'UNDEFINED'
-            # Tutti attivi, ma scoring più conservativo
-            strategy_mask = [True, True, True, True]
+            # Tutti attivi (6 elementi)
+            strategy_mask = [True, True, True, True, True, True]
             # Confidence basato su quanto siamo lontani dalle soglie
             adx_dist = min(abs(adx - 25), abs(adx - 20))
             choppiness_dist = min(abs(choppiness - 50), abs(choppiness - 61.8))

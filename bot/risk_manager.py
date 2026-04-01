@@ -230,11 +230,17 @@ class RiskManager:
             # Calcola percentuali basate su ATR
             atr_pct = atr_current / entry_price
 
-            # SL: 1.2 × ATR, bounds [0.3%, 1.0%]
-            sl_pct = min(0.010, max(0.003, 1.2 * atr_pct))
+            # SL: 1.2 × ATR, clippato tra [0.2%, 0.7%]
+            sl_multiplier = self.risk_config.get('stop_loss_atr_multiplier', 1.2)
+            sl_min = self.risk_config.get('stop_loss_min_pct', 0.002)
+            sl_max = self.risk_config.get('stop_loss_max_pct', 0.007)
+            sl_pct = min(sl_max, max(sl_min, sl_multiplier * atr_pct))
 
-            # TP: 2.5 × ATR, bounds [0.7%, 2.5%]
-            tp_pct = min(0.025, max(0.007, 2.5 * atr_pct))
+            # TP: 1.5 × ATR, clippato tra [0.3%, 0.8%]
+            tp_multiplier = self.risk_config.get('take_profit_atr_multiplier', 1.5)
+            tp_min = self.risk_config.get('take_profit_min_pct', 0.003)
+            tp_max = self.risk_config.get('take_profit_max_pct', 0.008)
+            tp_pct = min(tp_max, max(tp_min, tp_multiplier * atr_pct))
 
             # Trailing: activation 1.2×ATR, distance 0.4%
             trailing_activation = 1.2 * atr_pct
@@ -342,6 +348,42 @@ class RiskManager:
             return current_price >= take_profit and take_profit > 0
         else:
             return current_price <= take_profit and take_profit > 0
+
+    def check_break_even(self, trade: Dict, current_price: float) -> Optional[float]:
+        """
+        Se il trade è in profitto >= activation_pct, sposta SL a entry + lock_in_pct.
+        Questo converte potenziali perdite in piccoli profitti garantiti.
+
+        Returns:
+            Nuovo SL price se break-even attivato, None altrimenti
+        """
+        if not self.break_even_enabled:
+            return None
+
+        entry = trade['entry_price']
+        current_sl = trade.get('stop_loss', 0)
+        side = trade.get('side', 'buy')
+
+        if side == 'buy':
+            profit_pct = (current_price - entry) / entry
+            if profit_pct >= self.break_even_activation:
+                # Nuovo SL = entry + lock_in_pct (piccolo gain garantito)
+                lock_in_pct = self.risk_config.get('break_even', {}).get('lock_in_pct', 0.001)
+                new_sl = entry * (1 + lock_in_pct)
+                if new_sl > current_sl:  # Solo se migliora lo stop
+                    logger.debug(f"Break-even: SL spostato da {current_sl:.4f} a {new_sl:.4f}")
+                    return round(new_sl, 4)
+        else:  # SELL
+            profit_pct = (entry - current_price) / entry
+            if profit_pct >= self.break_even_activation:
+                # Nuovo SL = entry - lock_in_pct (piccolo gain garantito)
+                lock_in_pct = self.risk_config.get('break_even', {}).get('lock_in_pct', 0.001)
+                new_sl = entry * (1 - lock_in_pct)
+                if new_sl < current_sl:  # Solo se migliora lo stop (per SELL è < )
+                    logger.debug(f"Break-even: SL spostato da {current_sl:.4f} a {new_sl:.4f}")
+                    return round(new_sl, 4)
+
+        return None
 
     def should_take_partial_profit(self, trade: Dict, current_price: float) -> Dict:
         """

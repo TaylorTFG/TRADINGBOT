@@ -130,16 +130,28 @@ class MarketContextAnalyzer:
     def get_size_multiplier(self) -> float:
         """
         Calcola il moltiplicatore della size in base al VIX.
+        Per crypto-only mode: VIX azionario non applicabile.
 
         Returns:
             1.0 = size normale, 0.5 = size dimezzata
         """
+        # Per crypto-only mode: VIX azionario non applicabile
+        assets_config = self.config.get('assets', {})
+        only_crypto = (
+            not assets_config.get('etf', {}).get('enabled', False) and
+            not assets_config.get('stocks', {}).get('enabled', False) and
+            assets_config.get('crypto', {}).get('enabled', True)
+        )
+        if only_crypto:
+            return 1.0  # VIX non applicabile per crypto-only scalping
+
+        # Logica originale per modalità misto stock+crypto
         vix = self.get_vix_level()
         if vix is None:
             return 1.0
 
         if vix > self.vix_high_threshold:
-            logger.info(f"VIX={vix:.2f}: size dimezzata")
+            logger.info(f"VIX={vix:.2f}: size dimezzata (modalità mista)")
             return 0.5
         return 1.0
 
@@ -309,4 +321,13 @@ class MarketContextAnalyzer:
 
     def should_stop_trading(self) -> bool:
         """Verifica se le condizioni macro sono così avverse da fermare il trading."""
+        # Per crypto-only: ignora VIX e SP500 (entrambi azionari)
+        assets_config = self.config.get('assets', {})
+        only_crypto = (
+            not assets_config.get('etf', {}).get('enabled', False) and
+            not assets_config.get('stocks', {}).get('enabled', False)
+        )
+        if only_crypto:
+            return False  # Crypto opera H24 indipendentemente dai mercati azionari
+
         return self.is_sp500_crash() or self.is_risk_off_environment()
