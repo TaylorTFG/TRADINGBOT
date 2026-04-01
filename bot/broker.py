@@ -357,6 +357,43 @@ class BrokerClient:
             logger.warning(f"Errore recupero stato ordine {order_id}: {e}")
             return None
 
+    def get_orders(self, status: str = 'open', limit: int = 100) -> Optional[List[Dict]]:
+        """
+        Recupera gli ordini (open, closed, all).
+
+        Args:
+            status: 'open' (pending + partial fill), 'closed', 'all'
+            limit: Numero massimo di ordini
+
+        Returns:
+            Lista di ordini o None in caso di errore
+        """
+        try:
+            from alpaca.trading.enums import OrderStatus as AlpacaOrderStatus
+
+            orders = self._retry_on_error(
+                self.trading_client.get_orders,
+                status=status,
+                limit=limit
+            )
+
+            result = []
+            for order in orders:
+                result.append({
+                    'order_id': str(order.id),
+                    'symbol': order.symbol,
+                    'side': order.side.value if order.side else 'unknown',
+                    'qty': float(order.qty) if order.qty else 0,
+                    'status': order.status.value if order.status else 'unknown',
+                    'filled_qty': float(order.filled_qty) if order.filled_qty else 0,
+                    'filled_avg_price': float(order.filled_avg_price) if order.filled_avg_price else None,
+                    'created_at': str(order.created_at),
+                })
+            return result
+        except Exception as e:
+            logger.warning(f"Errore recupero ordini: {e}")
+            return None
+
     def cancel_order(self, order_id: str) -> bool:
         """
         Cancella un ordine specifico.

@@ -35,7 +35,8 @@
       "Bash(python3:*)",
       "Bash(python:*)",
       "Bash(timeout 10 streamlit run dashboard/app.py --logger.level=error)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(echo \"2. Kelly sizing: min 10 trade e max_normal_pnl = $5:\")"
     ]
   }
 }

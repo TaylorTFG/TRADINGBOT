@@ -1144,17 +1144,58 @@ class TradingEngine:
         return self._initial_virtual_capital
 
     def _sync_positions_with_alpaca(self):
-        """Allinea posizioni DB con quelle reali su Alpaca."""
+        """Allinea posizioni DB con quelle reali su Alpaca (posizioni + ordini pending)."""
         try:
             db_open = self.db.get_open_trades()
             alpaca_positions = {p['symbol'].replace('/', '') for p in self.broker.get_positions()}
 
+            # Recupera anche gli ordini pending da Alpaca
+            alpaca_orders = self.broker.get_orders(status='open')  # open = pending + partialmente eseguiti
+            alpaca_pending_symbols = set()
+            if alpaca_orders:
+                for order in alpaca_orders:
+                    # Order symbol è senza '/', symbol del trade è con '/'
+                    symbol_with_slash = order.get('symbol', '').replace('USD', '/USD') if '/' not in order.get('symbol', '') else order.get('symbol', '')
+                    alpaca_pending_symbols.add(order.get('symbol', ''))
+
             for trade in db_open:
                 symbol_alpaca = trade['symbol'].replace('/', '')
-                if symbol_alpaca not in alpaca_positions:
+                order_id = trade.get('alpaca_order_id')
+
+                # Controlla se la posizione è eseguita su Alpaca
+                position_exists = symbol_alpaca in alpaca_positions
+
+                # Controlla se c'è un ordine pending per questo trade
+                order_exists = symbol_alpaca in alpaca_pending_symbols or (order_id and any(o.get('order_id') == order_id for o in alpaca_orders or []))
+
+                # Se né posizione né ordine, chiudi il trade come ghost position
+                if not position_exists and not order_exists:
                     exit_price = self.broker.get_latest_price(trade['symbol']) or trade['entry_price']
-                    self.db.close_trade(trade['id'], exit_price, 'Startup sync: position not found on Alpaca')
-                    logger.warning(f"[STARTUP SYNC] Closed ghost position: {trade['symbol']}")
+                    self.db.close_trade(trade['id'], exit_price, 'Startup sync: position and order not found on Alpaca')
+                    logger.warning(
+                        f"[STARTUP SYNC] Closed ghost position: {trade['symbol']} "
+                        f"(no position, no pending order)"
+                    )
+                elif order_exists and not position_exists:
+                    # Ordine pendente da molto tempo → cancella e chiudi trade
+                    entry_time = datetime.fromisoformat(trade.get('entry_time', datetime.now().isoformat()))
+                    age_seconds = (datetime.now() - entry_time).total_seconds()
+
+                    if age_seconds > 3600:  # > 1 ora di ordine pending
+                        logger.warning(
+                            f"[STARTUP SYNC] {trade['symbol']} ordine pending da {age_seconds//60:.0f} min, cancellazione..."
+                        )
+                        # Cancella l'ordine su Alpaca
+                        try:
+                            if order_id:
+                                self.broker.cancel_order(order_id)
+                        except Exception as e:
+                            logger.error(f"Errore cancellazione ordine {order_id}: {e}")
+
+                        # Chiudi il trade nel DB
+                        exit_price = self.broker.get_latest_price(trade['symbol']) or trade['entry_price']
+                        self.db.close_trade(trade['id'], exit_price, 'Startup sync: pending order cancelled (>1h)')
+                        logger.warning(f"[STARTUP SYNC] Trade chiuso: {trade['symbol']} (ordine cancellato)")
         except Exception as e:
             logger.error(f"Errore sync posizioni Alpaca: {e}")
 
