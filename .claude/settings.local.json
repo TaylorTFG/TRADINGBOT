@@ -36,7 +36,8 @@
       "Bash(python:*)",
       "Bash(timeout 10 streamlit run dashboard/app.py --logger.level=error)",
       "Bash(cd:*)",
-      "Bash(echo \"2. Kelly sizing: min 10 trade e max_normal_pnl = $5:\")"
+      "Bash(echo \"2. Kelly sizing: min 10 trade e max_normal_pnl = $5:\")",
+      "Bash(sqlite3 data/trades.db \"SELECT id, symbol, side, quantity, entry_price, status, alpaca_order_id FROM trades WHERE symbol LIKE ''%SOL%'' ORDER BY entry_time DESC LIMIT 5;\")"
     ]
   }
 }

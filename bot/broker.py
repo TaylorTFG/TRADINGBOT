@@ -369,17 +369,19 @@ class BrokerClient:
             Lista di ordini o None in caso di errore
         """
         try:
-            from alpaca.trading.enums import OrderStatus as AlpacaOrderStatus
-
             orders = self._retry_on_error(
                 self.trading_client.get_orders,
                 status=status,
                 limit=limit
             )
 
+            if not orders:
+                logger.debug(f"Nessun ordine {status} su Alpaca")
+                return []
+
             result = []
             for order in orders:
-                result.append({
+                order_dict = {
                     'order_id': str(order.id),
                     'symbol': order.symbol,
                     'side': order.side.value if order.side else 'unknown',
@@ -388,10 +390,14 @@ class BrokerClient:
                     'filled_qty': float(order.filled_qty) if order.filled_qty else 0,
                     'filled_avg_price': float(order.filled_avg_price) if order.filled_avg_price else None,
                     'created_at': str(order.created_at),
-                })
+                }
+                result.append(order_dict)
+                logger.debug(f"Ordine: {order_dict['symbol']} {order_dict['side']} {order_dict['qty']} → {order_dict['status']}")
+
+            logger.info(f"Recuperati {len(result)} ordini {status} da Alpaca")
             return result
         except Exception as e:
-            logger.warning(f"Errore recupero ordini: {e}")
+            logger.error(f"Errore recupero ordini {status}: {e}", exc_info=True)
             return None
 
     def cancel_order(self, order_id: str) -> bool:
