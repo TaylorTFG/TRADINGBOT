@@ -845,16 +845,50 @@ class TradingEngine:
         )
 
         if order:
+            # ---- ATTENDI CHE L'ORDINE SIA FILLED (max 15 secondi) ----
+            order_id = order.get('order_id')
+            filled_price = order.get('filled_price')
+            max_wait = 15  # secondi
+            wait_interval = 1  # secondo
+
+            if not filled_price and order_id:
+                logger.info(f"[{symbol}] Ordine piazzato (ID={order_id}), attendo fill...")
+                for attempt in range(max_wait):
+                    import time
+                    time.sleep(wait_interval)
+
+                    # Controlla stato ordine su Alpaca
+                    order_status = self.broker.get_order_status(order_id)
+                    logger.debug(f"[{symbol}] Stato ordine: {order_status}")
+
+                    if order_status == 'filled':
+                        # Recupera prezzo filled
+                        filled_order = self.broker.get_order_by_id(order_id) if hasattr(self.broker, 'get_order_by_id') else None
+                        filled_price = order.get('filled_price')
+                        logger.info(f"[{symbol}] ✓ Ordine FILLED dopo {attempt+1}sec @ ${filled_price or price:.2f}")
+                        break
+                    elif order_status in ['canceled', 'rejected', 'expired']:
+                        logger.warning(f"[{symbol}] Ordine {order_status}, cancellazione...")
+                        return
+                    elif attempt == max_wait - 1:
+                        # Timeout: cancella ordine
+                        logger.warning(f"[{symbol}] Timeout {max_wait}sec senza fill, cancellazione ordine...")
+                        try:
+                            self.broker.cancel_order(order_id)
+                        except:
+                            pass
+                        return
+
             # Determina la strategia principale
             strategy_name = f"meta_{vote_result['buy_votes']}v_{vote_result.get('strategy_name', 'multi')}"
 
-            # Registra nel database
+            # Registra nel database (SOLO DOPO CHE L'ORDINE È FILLED)
             entry_reason = f"MetaStrategy: {vote_result.get('reason', 'Consensus reached')}"
             trade_id = self.db.insert_trade({
                 'symbol': symbol,
                 'side': 'buy',
                 'quantity': qty,
-                'entry_price': order.get('filled_price') or price,
+                'entry_price': filled_price or price,
                 'strategy': strategy_name,
                 'entry_reason': entry_reason,
                 'stop_loss': stop_loss,
