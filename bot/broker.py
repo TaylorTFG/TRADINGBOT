@@ -363,17 +363,15 @@ class BrokerClient:
 
         Args:
             status: 'open' filtra localmente, 'closed' filtra localmente
-            limit: Numero massimo di ordini
+            limit: Numero massimo di ordini (non usato — API non lo supporta)
 
         Returns:
             Lista di ordini o None in caso di errore
         """
         try:
-            from alpaca.trading.enums import OrderStatus
-
             # Alpaca API: get_orders() senza parametri ritorna tutti gli ordini
             # Filtriamo localmente per status
-            orders = self._retry_on_error(self.trading_client.get_orders, limit=limit)
+            orders = self._retry_on_error(self.trading_client.get_orders)
 
             if not orders:
                 logger.debug(f"Nessun ordine su Alpaca")
