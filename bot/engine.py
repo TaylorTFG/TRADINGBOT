@@ -1204,8 +1204,8 @@ class TradingEngine:
                     )
                     logger.warning(f"[STARTUP SYNC] ✓ Chiuso trade: {symbol}")
 
-                # Se ordine pending da > 1h, cancella
-                elif order_exists and not position_exists and age_seconds > 3600:
+                # Se ordine pending da > 5min, cancella (ordini di mercato non dovrebbero restare pending)
+                elif order_exists and not position_exists and age_seconds > 300:
                     logger.warning(
                         f"[STARTUP SYNC] {symbol} ordine pending da {age_seconds//60:.0f}min "
                         f"(order_id={order_id})"
