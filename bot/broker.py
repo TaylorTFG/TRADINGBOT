@@ -357,6 +357,38 @@ class BrokerClient:
             logger.warning(f"Errore recupero stato ordine {order_id}: {e}")
             return None
 
+    def get_order_by_id(self, order_id: str) -> Optional[Dict]:
+        """
+        Recupera i dettagli completi di un ordine specifico.
+
+        Args:
+            order_id: ID dell'ordine
+
+        Returns:
+            Dizionario con dettagli ordine (status, filled_price, filled_qty, ecc.) o None se errore
+        """
+        try:
+            order = self._retry_on_error(
+                self.trading_client.get_order_by_id,
+                order_id
+            )
+            if not order:
+                return None
+
+            return {
+                'order_id': str(order.id),
+                'symbol': order.symbol,
+                'side': order.side.value if hasattr(order.side, 'value') else str(order.side),
+                'qty': float(order.qty) if order.qty else 0,
+                'status': order.status.value if hasattr(order.status, 'value') else str(order.status),
+                'filled_qty': float(order.filled_qty) if order.filled_qty else 0,
+                'filled_avg_price': float(order.filled_avg_price) if order.filled_avg_price else None,
+                'created_at': str(order.created_at),
+            }
+        except Exception as e:
+            logger.warning(f"Errore recupero dettagli ordine {order_id}: {e}")
+            return None
+
     def get_orders(self, status: str = 'open', limit: int = 100) -> Optional[List[Dict]]:
         """
         Recupera gli ordini aperti (pending, partially filled).

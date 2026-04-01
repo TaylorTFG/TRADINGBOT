@@ -862,9 +862,10 @@ class TradingEngine:
                     logger.debug(f"[{symbol}] Stato ordine: {order_status}")
 
                     if order_status == 'filled':
-                        # Recupera prezzo filled
-                        filled_order = self.broker.get_order_by_id(order_id) if hasattr(self.broker, 'get_order_by_id') else None
-                        filled_price = order.get('filled_price')
+                        # Recupera prezzo filled dal broker
+                        filled_order = self.broker.get_order_by_id(order_id)
+                        if filled_order and filled_order.get('filled_avg_price'):
+                            filled_price = filled_order['filled_avg_price']
                         logger.info(f"[{symbol}] ✓ Ordine FILLED dopo {attempt+1}sec @ ${filled_price or price:.2f}")
                         break
                     elif order_status in ['canceled', 'rejected', 'expired']:
